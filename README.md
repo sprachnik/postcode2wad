@@ -28,7 +28,8 @@ tile bng400-1574-423  (400m square)
 ```
 
 Next up is M2 (dressing: land cover, trees, street signs, geolocation HUD). See
-[`docs/brief.md`](docs/brief.md) for the full brief, milestones and open research.
+[`TODO.md`](TODO.md) for the working list — including the known rough edges — and
+[`docs/brief.md`](docs/brief.md) for the full brief and milestones.
 
 ## How it works
 
