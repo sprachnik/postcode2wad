@@ -19,7 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+preview = ["pillow>=10.0"]
+dev = ["pytest>=8.0", "ruff>=0.5", "pillow>=10.0"]
 
 [project.scripts]
 postcode2wad = "postcode2wad.cli:main"

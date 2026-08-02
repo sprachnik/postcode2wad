@@ -74,7 +74,9 @@ def main() -> int:
             pos, size = by_name[lump]
             textures += parse_texture_lump(data[pos : pos + size])
 
-    print(f"{Path(args.wad).name}: {len(entries)} lumps, {len(flats)} flats, {len(textures)} textures")
+    print(
+        f"{Path(args.wad).name}: {len(entries)} lumps, {len(flats)} flats, {len(textures)} textures"
+    )
 
     if args.list in ("flats", "all"):
         print("\n-- FLATS --")

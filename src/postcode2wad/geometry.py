@@ -23,6 +23,7 @@ linedef v1=q, v2=p, and the face becomes its front sector.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 
 from shapely.geometry import LineString, Polygon
@@ -67,6 +68,9 @@ class MapGeometry:
     sidedefs: list[dict] = field(default_factory=list)
     linedefs: list[dict] = field(default_factory=list)
     things: list[Thing] = field(default_factory=list)
+    #: The arrangement face behind each sector, parallel to `sectors`. Not part
+    #: of the UDMF output — kept for the top-down preview renderer.
+    faces: list[Polygon] = field(default_factory=list)
 
     def stats(self) -> str:
         return (
@@ -84,7 +88,7 @@ class _VertexTable:
         self._index: dict[Coord, int] = {}
 
     def add(self, x: float, y: float) -> int:
-        key = (int(round(x)), int(round(y)))
+        key = (round(x), round(y))
         if key not in self._index:
             self._index[key] = len(self.coords)
             self.coords.append(key)
@@ -141,9 +145,10 @@ def build_geometry(
     # correctness first.
     face_sector: list[int] = []
     face_spec: list[SectorSpec] = []
-    for _face, spec in owned:
+    for face, spec in owned:
         face_sector.append(len(geo.sectors))
         face_spec.append(spec)
+        geo.faces.append(face)
         geo.sectors.append(
             {
                 "heightfloor": spec.floor,
@@ -159,9 +164,9 @@ def build_geometry(
     for face_idx, (face, _spec) in enumerate(owned):
         for ring in _rings(face):
             # Rings are closed, so ring[1:] is exactly the segment partner list.
-            for (ax, ay), (bx, by) in zip(ring, ring[1:]):
-                a = (int(round(ax)), int(round(ay)))
-                b = (int(round(bx)), int(round(by)))
+            for (ax, ay), (bx, by) in itertools.pairwise(ring):
+                a = (round(ax), round(ay))
+                b = (round(bx), round(by))
                 if a == b:
                     continue  # collapsed by integer snapping
                 key = (a, b) if a <= b else (b, a)
@@ -197,21 +202,27 @@ def build_geometry(
                 line["special"] = LINE_HORIZON
         else:
             back_spec = face_spec[back_face]
-            # Set upper and lower on both sides; the renderer only draws the
-            # one that faces a step, and an unset texture over a step is the
-            # classic "hall of mirrors".
+            # The lower texture is drawn on the side facing the LOWER sector,
+            # but it is the *higher* sector that is standing up — so a building
+            # next to grass must be painted with the building's texture, not the
+            # grass's. Getting this backwards paints every wall in the terrain's
+            # texture and the whole map looks like mud cliffs.
+            riser = front_spec if front_spec.floor >= back_spec.floor else back_spec
+            # Same logic inverted for uppers: the lower ceiling is the overhang.
+            soffit = front_spec if front_spec.ceiling <= back_spec.ceiling else back_spec
+
             geo.sidedefs.append(
                 {
                     "sector": face_sector[front_face],
-                    "texturebottom": front_spec.wall_tex,
-                    "texturetop": front_spec.wall_tex,
+                    "texturebottom": riser.wall_tex,
+                    "texturetop": soffit.wall_tex,
                 }
             )
             geo.sidedefs.append(
                 {
                     "sector": face_sector[back_face],
-                    "texturebottom": back_spec.wall_tex,
-                    "texturetop": back_spec.wall_tex,
+                    "texturebottom": riser.wall_tex,
+                    "texturetop": soffit.wall_tex,
                 }
             )
             line["sideback"] = sidefront + 1
@@ -221,4 +232,32 @@ def build_geometry(
 
     geo.vertices = verts.coords
     geo.things = list(things or [])
+    _drop_empty_sectors(geo)
     return geo
+
+
+def _drop_empty_sectors(geo: MapGeometry) -> int:
+    """Remove sectors no sidedef references, renumbering what's left.
+
+    Slivers can lose every edge — to integer snapping, or to the self-touching
+    check above — leaving a sector with no lines. GZDoom warns about these on
+    load ("Sector N has no lines") and they are pure noise in the output.
+    """
+    used = {side["sector"] for side in geo.sidedefs}
+    if len(used) == len(geo.sectors):
+        return 0
+
+    remap: dict[int, int] = {}
+    kept: list[dict] = []
+    for index, sector in enumerate(geo.sectors):
+        if index in used:
+            remap[index] = len(kept)
+            kept.append(sector)
+
+    dropped = len(geo.sectors) - len(kept)
+    geo.sectors = kept
+    if geo.faces:
+        geo.faces = [f for i, f in enumerate(geo.faces) if i in remap]
+    for side in geo.sidedefs:
+        side["sector"] = remap[side["sector"]]
+    return dropped

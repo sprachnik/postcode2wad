@@ -26,3 +26,6 @@ data/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Stray HTML dumps from research tooling
+dl.html

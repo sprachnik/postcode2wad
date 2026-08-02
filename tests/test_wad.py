@@ -28,7 +28,7 @@ def test_header_and_directory():
 
 def test_map_wad_lump_order():
     """GZDoom requires marker, then TEXTMAP, then ENDMAP — order is load-bearing."""
-    _magic, entries = read_dir(build_map_wad("namespace = \"zdoom\";\n", "MAP01"))
+    _magic, entries = read_dir(build_map_wad('namespace = "zdoom";\n', "MAP01"))
     assert [e[0] for e in entries] == ["MAP01", "TEXTMAP", "ENDMAP"]
 
 

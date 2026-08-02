@@ -34,7 +34,9 @@ def _value(value: object) -> str:
 
 
 def _block(kind: str, fields: dict) -> str:
-    body = " ".join(f"{k} = {_value(v)};" for k, v in fields.items() if v is not None and v is not False)
+    body = " ".join(
+        f"{k} = {_value(v)};" for k, v in fields.items() if v is not None and v is not False
+    )
     return f"{kind} {{ {body} }}"
 
 

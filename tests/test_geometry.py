@@ -78,6 +78,6 @@ def test_textmap_round_trip_is_wellformed():
     assert text.count("vertex {") == 4
     assert text.count("linedef {") == 4
     assert text.count("sector {") == 1
-    assert 'type = 1;' in text
+    assert "type = 1;" in text
     # Every block must be closed and every assignment terminated.
     assert text.count("{") == text.count("}")

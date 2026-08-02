@@ -14,7 +14,7 @@ from __future__ import annotations
 from shapely.geometry import Polygon, box
 
 from . import UNITS_PER_METRE as U
-from .geometry import SKY_FLAT, SectorSpec, Thing, build_geometry
+from .geometry import SectorSpec, Thing, build_geometry
 
 SKY_HEIGHT = 4096  # 128m of headroom; the sky flat means you never see it
 
@@ -28,7 +28,7 @@ TERRAIN_WALL = "ROCK4"
 
 def m(metres: float) -> int:
     """Metres -> map units, integer-snapped."""
-    return int(round(metres * U))
+    return round(metres * U)
 
 
 def build_m0_scene(size_m: float = 200.0):
