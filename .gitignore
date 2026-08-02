@@ -10,6 +10,9 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
+# Downloaded engine + IWAD (portable, not ours to redistribute)
+tools/
+
 # Generated maps and cached geodata
 *.pk3
 *.wad

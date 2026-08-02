@@ -1,0 +1,224 @@
+"""Turn a pile of overlapping polygons into valid Doom sector topology.
+
+This is the heart of the generator. Doom geometry is a *planar partition*: every
+linedef is shared by at most two sectors, and a sector is a closed loop of them.
+Real-world polygons are nothing like that — buildings sit on top of terrain,
+roads cross each other, footprints share walls.
+
+The fix is to stop thinking in polygons and think in arrangements:
+
+1. Take the boundary of every input polygon as a set of linestrings.
+2. `unary_union` them. Shapely nodes the network — every crossing becomes a
+   shared vertex, so no two segments cross except at endpoints.
+3. `polygonize` the result into faces. Faces tile the plane with no overlaps,
+   which is exactly the planar partition Doom wants.
+4. Assign each face to whichever input polygon contains it. Later specs win, so
+   a building laid over terrain takes the building's floor height.
+
+Winding is the part that bites. `orient` gives every face a CCW exterior and CW
+holes, so walking any ring the face interior is always on your LEFT. Doom's
+front side is on the RIGHT of v1->v2. So a ring segment p->q is emitted as a
+linedef v1=q, v2=p, and the face becomes its front sector.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from shapely.geometry import LineString, Polygon
+from shapely.geometry.polygon import orient
+from shapely.ops import polygonize, unary_union
+
+SKY_FLAT = "F_SKY1"
+
+#: GZDoom's Line_Horizon. A one-sided line with this special renders as an
+#: infinite horizon — its sector's floor below, sky above — instead of a wall.
+#: Without it the tile perimeter is a 128m-tall wall boxing the player in.
+LINE_HORIZON = 9
+
+Coord = tuple[int, int]
+
+
+@dataclass
+class SectorSpec:
+    """One input region. Heights are map units; polygons are map-unit coords."""
+
+    polygon: Polygon
+    floor: int
+    ceiling: int
+    floor_tex: str
+    ceil_tex: str = SKY_FLAT
+    wall_tex: str = "BRICK7"
+    light: int = 192
+
+
+@dataclass
+class Thing:
+    x: int
+    y: int
+    type: int
+    angle: int = 0
+
+
+@dataclass
+class MapGeometry:
+    vertices: list[Coord] = field(default_factory=list)
+    sectors: list[dict] = field(default_factory=list)
+    sidedefs: list[dict] = field(default_factory=list)
+    linedefs: list[dict] = field(default_factory=list)
+    things: list[Thing] = field(default_factory=list)
+
+    def stats(self) -> str:
+        return (
+            f"{len(self.vertices)} vertices, {len(self.linedefs)} linedefs, "
+            f"{len(self.sidedefs)} sidedefs, {len(self.sectors)} sectors, "
+            f"{len(self.things)} things"
+        )
+
+
+class _VertexTable:
+    """Dedupes integer coordinates to vertex indices."""
+
+    def __init__(self) -> None:
+        self.coords: list[Coord] = []
+        self._index: dict[Coord, int] = {}
+
+    def add(self, x: float, y: float) -> int:
+        key = (int(round(x)), int(round(y)))
+        if key not in self._index:
+            self._index[key] = len(self.coords)
+            self.coords.append(key)
+        return self._index[key]
+
+
+def _rings(poly: Polygon) -> list[list[tuple[float, float]]]:
+    poly = orient(poly, sign=1.0)  # CCW exterior, CW interiors
+    out = [list(poly.exterior.coords)]
+    out.extend(list(interior.coords) for interior in poly.interiors)
+    return out
+
+
+def build_geometry(
+    specs: list[SectorSpec],
+    things: list[Thing] | None = None,
+    min_face_area: float = 4.0,
+    horizon_border: bool = True,
+) -> MapGeometry:
+    """Arrange overlapping SectorSpecs into Doom-legal sector topology."""
+    if not specs:
+        raise ValueError("need at least one SectorSpec")
+
+    boundaries: list[LineString] = []
+    for spec in specs:
+        poly = spec.polygon
+        boundaries.append(LineString(poly.exterior.coords))
+        boundaries.extend(LineString(r.coords) for r in poly.interiors)
+
+    noded = unary_union(boundaries)
+    faces = [f for f in polygonize(noded) if f.area >= min_face_area]
+    if not faces:
+        raise ValueError("arrangement produced no faces — check input polygons")
+
+    # Assign each face to the last spec containing it. Buildings are passed
+    # after terrain, so they win the overlap.
+    owned: list[tuple[Polygon, SectorSpec]] = []
+    for face in faces:
+        probe = face.representative_point()
+        owner = None
+        for spec in specs:
+            if spec.polygon.contains(probe):
+                owner = spec
+        if owner is not None:
+            owned.append((face, owner))
+
+    if not owned:
+        raise ValueError("no face fell inside any SectorSpec")
+
+    geo = MapGeometry()
+    verts = _VertexTable()
+
+    # One sector per face. Merging co-planar neighbours is a later optimisation;
+    # correctness first.
+    face_sector: list[int] = []
+    face_spec: list[SectorSpec] = []
+    for _face, spec in owned:
+        face_sector.append(len(geo.sectors))
+        face_spec.append(spec)
+        geo.sectors.append(
+            {
+                "heightfloor": spec.floor,
+                "heightceiling": spec.ceiling,
+                "texturefloor": spec.floor_tex,
+                "textureceiling": spec.ceil_tex,
+                "lightlevel": spec.light,
+            }
+        )
+
+    # Collect directed ring segments. Face interior is always on the LEFT of p->q.
+    edges: dict[tuple[Coord, Coord], list[tuple[int, Coord, Coord]]] = {}
+    for face_idx, (face, _spec) in enumerate(owned):
+        for ring in _rings(face):
+            # Rings are closed, so ring[1:] is exactly the segment partner list.
+            for (ax, ay), (bx, by) in zip(ring, ring[1:]):
+                a = (int(round(ax)), int(round(ay)))
+                b = (int(round(bx)), int(round(by)))
+                if a == b:
+                    continue  # collapsed by integer snapping
+                key = (a, b) if a <= b else (b, a)
+                edges.setdefault(key, []).append((face_idx, a, b))
+
+    for uses in edges.values():
+        if len(uses) > 2:
+            # Non-manifold: more than two faces claim this edge. Shapely's
+            # arrangement should prevent it; keep the first two and move on.
+            uses = uses[:2]
+
+        front_face, p, q = uses[0]
+        back_face = uses[1][0] if len(uses) == 2 else None
+        if back_face == front_face:
+            continue  # a face touching itself along an edge; skip the sliver
+
+        front_spec = face_spec[front_face]
+        # Face interior is left of p->q, so reverse to put it on the right.
+        v1 = verts.add(*q)
+        v2 = verts.add(*p)
+
+        sidefront = len(geo.sidedefs)
+        line: dict = {"v1": v1, "v2": v2, "sidefront": sidefront}
+
+        if back_face is None:
+            # One-sided lines only ever occur on the tile perimeter — every
+            # interior boundary has a face on both sides by construction.
+            geo.sidedefs.append(
+                {"sector": face_sector[front_face], "texturemiddle": front_spec.wall_tex}
+            )
+            line["blocking"] = True
+            if horizon_border:
+                line["special"] = LINE_HORIZON
+        else:
+            back_spec = face_spec[back_face]
+            # Set upper and lower on both sides; the renderer only draws the
+            # one that faces a step, and an unset texture over a step is the
+            # classic "hall of mirrors".
+            geo.sidedefs.append(
+                {
+                    "sector": face_sector[front_face],
+                    "texturebottom": front_spec.wall_tex,
+                    "texturetop": front_spec.wall_tex,
+                }
+            )
+            geo.sidedefs.append(
+                {
+                    "sector": face_sector[back_face],
+                    "texturebottom": back_spec.wall_tex,
+                    "texturetop": back_spec.wall_tex,
+                }
+            )
+            line["sideback"] = sidefront + 1
+            line["twosided"] = True
+
+        geo.linedefs.append(line)
+
+    geo.vertices = verts.coords
+    geo.things = list(things or [])
+    return geo

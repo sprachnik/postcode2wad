@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="output PK3 path (default: out.pk3)",
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="generate the M0 synthetic proof scene instead of a real place",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -43,6 +48,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.demo:
+        from .demo import build_m0_geometry
+        from .pk3 import write_pk3
+        from .udmf import emit_textmap
+
+        geo = build_m0_geometry(size_m=float(args.size))
+        textmap = emit_textmap(geo, comment="postcode2wad M0 synthetic proof scene")
+        out = write_pk3(args.out, textmap, title="M0 Geometry Proof")
+        print(f"{geo.stats()}")
+        print(f"wrote {out}")
+        return 0
 
     if not args.postcode and not args.latlng:
         parser.error("give a postcode or --latlng")
