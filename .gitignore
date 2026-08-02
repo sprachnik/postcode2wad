@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Generated maps and cached geodata
+*.pk3
+*.wad
+!tests/fixtures/*.wad
+cache/
+out/
+data/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
