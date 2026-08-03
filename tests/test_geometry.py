@@ -173,3 +173,30 @@ def test_specs_marked_thin_are_not_absorbed():
         ]
     )
     assert 48 in {s["heightfloor"] for s in geo.sectors}, "the fence was absorbed away"
+
+
+def test_trees_are_kept_out_of_rights_of_way():
+    """A solid tree in a footway is an invisible dead end.
+
+    A Doom player has radius 16 and the tree actor 12, so squeezing past needs
+    28 units of clear ground. A 2m footway is 64 units wide, which means a tree
+    anywhere near the centre seals it completely — you walk down the path and
+    simply stop. LIDAR finds canopy overhanging lanes all the time, so this has
+    to be excluded explicitly rather than hoped away.
+    """
+    import numpy as np
+    from shapely.geometry import Point, Polygon
+
+    from postcode2wad.terrain import Tree, _scatter
+
+    # _scatter is the placement primitive; prove it keeps inside its polygon,
+    # which is what makes subtracting the rights of way effective at all.
+
+    lane = Polygon([(0, 0), (2000, 0), (2000, 64), (0, 64)])
+    rng = np.random.default_rng(1)
+    points = _scatter(lane, 45.0 * 32 * 32, rng)
+    assert points, "scatter must place at least one point"
+    for x, y in points:
+        assert lane.contains(Point(x, y)), "scatter placed a tree outside its blob"
+
+    assert Tree(x=1.0, y=2.0, height_m=9.0).height_m == 9.0

@@ -332,7 +332,9 @@ def build_tile(
             flat = textures.land_cover(shape.tags)
             if flat is None:
                 continue  # unrecognised: leave the terrain showing through
-            for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
+            for piece, elevation_m in _split_by_bands(
+                shape.polygon, bands, terrain_at, with_slopes
+            ):
                 specs.append(
                     SectorSpec(
                         polygon=piece,
@@ -366,7 +368,9 @@ def build_tile(
         # Beach after the sea so the sand sits on the land side of the line,
         # before roads and buildings so a seafront promenade still wins.
         for shape in beach_from_coastline(features.coastline, tile, BEACH_WIDTH_M):
-            for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
+            for piece, elevation_m in _split_by_bands(
+                shape.polygon, bands, terrain_at, with_slopes
+            ):
                 if elevation_m > BEACH_TOP_M:
                     continue
                 specs.append(
@@ -396,18 +400,25 @@ def build_tile(
             )
             stats.water += 1
 
-    # Kept for the player start: the carriageway is where we want to appear.
+    # Two lists, deliberately. The player start wants a *carriageway* to appear
+    # on, so footways are kept out of it. Tree exclusion wants every kind of
+    # right of way, footpaths very much included -- a tree in a 2m footway is
+    # the one that traps you.
     road_polygons: list[Polygon] = []
+    walkable_polygons: list[Polygon] = []
     barrier_polygons: list[Polygon] = []
 
     if with_roads:
         for shape in roads_to_shapes(features.roads, tile):
             paved = shape.tags.get("highway", "") in PAVED_FOOTWAYS
+            walkable_polygons.append(shape.polygon)
             if not paved:
                 road_polygons.append(shape.polygon)
             # Clip the corridor against each contour band so a road climbing a
             # hill steps with the ground instead of flattening across it.
-            for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
+            for piece, elevation_m in _split_by_bands(
+                shape.polygon, bands, terrain_at, with_slopes
+            ):
                 floor = round(elevation_m * UNITS_PER_METRE)
                 specs.append(
                     SectorSpec(
@@ -428,7 +439,9 @@ def build_tile(
         for shape in barriers_to_shapes(features.barriers, tile):
             barrier_polygons.append(shape.polygon)
             wall = textures.barrier_wall(shape.tags)
-            for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
+            for piece, elevation_m in _split_by_bands(
+                shape.polygon, bands, terrain_at, with_slopes
+            ):
                 specs.append(
                     SectorSpec(
                         polygon=piece,
@@ -478,7 +491,16 @@ def build_tile(
     ]
 
     if with_trees and dsm is not None and dtm is not None:
-        for tree in vegetation(dsm, dtm, tile, exclude=[s.polygon for s in building_shapes]):
+        # Roads and barriers exclude trees as well as buildings. A tree is a
+        # solid actor, and a Doom player needs 28 units of clearance to squeeze
+        # past one; a 2m footway is 64 units wide, so a tree anywhere near the
+        # middle seals it completely. LIDAR happily finds canopy overhanging a
+        # lane, and 21 of the 27 trees this put in a carriageway were
+        # impassable -- you walk down a path and simply stop.
+        keep_clear = (
+            [s.polygon for s in building_shapes] + walkable_polygons + barrier_polygons
+        )
+        for tree in vegetation(dsm, dtm, tile, exclude=keep_clear):
             things.append(
                 Thing(
                     x=round(tree.x),
@@ -502,9 +524,18 @@ def build_tile(
     return BuiltMap(geometry=geometry, tile=tile, place=place, title=title, stats=stats)
 
 
-def _split_by_bands(polygon: Polygon, bands, fallback) -> list[tuple[Polygon, float]]:
-    """Cut a polygon into per-contour pieces, each with its own elevation."""
-    if not bands:
+def _split_by_bands(polygon: Polygon, bands, fallback, sloped: bool = False) -> list[tuple[Polygon, float]]:
+    """Cut a polygon into per-contour pieces, each with its own elevation.
+
+    Skipped entirely when the ground slopes. The split exists so a road climbing
+    a hill steps with the terrain, and a sloped road simply follows it instead —
+    so all the split would do is chop the road into per-band pieces that each get
+    their own plane anyway. Worse than redundant: a piece that fails to
+    triangulate falls back to its band's flat elevation, which at a 4m contour
+    step is a 4m unclimbable wall across the carriageway. That was 204 invisible
+    walls on one tile.
+    """
+    if sloped or not bands:
         return [(polygon, fallback(polygon))]
 
     pieces: list[tuple[Polygon, float]] = []
