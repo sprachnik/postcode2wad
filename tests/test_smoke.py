@@ -31,6 +31,9 @@ from postcode2wad.sources import postcodes
 CACHE = Path("cache")
 POSTCODE = "CT1 2EH"
 
+#: The roof flat, so a building face is recognisable in the emitted map.
+ROOF_FLAT = "CEIL5_2"
+
 #: Doom's climb limit, and the narrowest gap a 16-radius player fits through.
 MAX_STEP = 24
 MIN_GAP = 33
@@ -194,6 +197,60 @@ def test_no_interior_one_sided_lines(tile):
     assert not interior, (
         f"{len(interior)} interior one-sided lines, longest {max(interior) / 32:.2f} m "
         "— each is a wall from the ground to the sky"
+    )
+
+
+def test_no_building_stands_on_its_own(tile):
+    """A building face must be closed off by other building faces.
+
+    Stated by the player who found these, and it is the right invariant: a
+    house texture that is not boxed off is either wrong and should go, or it
+    belongs to a building and should join it. There is no third case.
+
+    They arise because footprints get clipped by things unrelated to them -- a
+    contour band, a garden boundary a few centimetres off the wall -- and the
+    offcut becomes its own sector at roof height. With ground on both sides it
+    renders as a freestanding brick fin, and the worst was 24m long and 48cm
+    thick, standing in a garden with nothing behind it.
+
+    Two conditions, and both are needed. Mostly-open perimeter alone is not a
+    fin: a detached house is a single sector with grass right round it, which
+    is exactly what a house should be. Thinness alone is not a fin either: a
+    narrow strip *between* two roof faces is flush with them and invisible.
+    A face that is both is a wall standing on its own.
+    """
+    boundary = collections.defaultdict(lambda: collections.defaultdict(float))
+    for line in tile.linedefs:
+        if "sideback" not in line:
+            continue
+        a = tile.sidedefs[line["sidefront"]]["sector"]
+        b = tile.sidedefs[line["sideback"]]["sector"]
+        if a == b:
+            continue
+        length = math.dist(tile.vertices[line["v1"]], tile.vertices[line["v2"]])
+        boundary[a][b] += length
+        boundary[b][a] += length
+
+    def is_roof(index: int) -> bool:
+        return tile.sectors[index].get("texturefloor") == ROOF_FLAT
+
+    fins = []
+    for index, joins in boundary.items():
+        if not is_roof(index) or not joins:
+            continue
+        face = tile.faces[index]
+        # Mean width of a polygon: four times its area over its perimeter.
+        if not face.length or 4 * face.area / face.length >= 32:  # 1 metre
+            continue
+        roofed = sum(length for other, length in joins.items() if is_roof(other))
+        if roofed / sum(joins.values()) < 0.5:
+            fins.append((4 * face.area / face.length / 32, index))
+
+    fins.sort()
+    assert not fins, (
+        f"{len(fins)} building sectors are under a metre thick with most of their "
+        f"perimeter against open ground — freestanding walls with no building "
+        f"behind them; thinnest is {fins[0][0]:.2f} m"
     )
 
 

@@ -71,6 +71,18 @@ SEA_SURFACE_UNITS = -24
 #: physical, it just stops every surface in frame having identical value.
 DAYLIGHT = 208
 ROOF_LIGHT = 216  # unshaded, facing straight up
+
+#: A piece of building thinner than this is an offcut, not a building.
+#:
+#: Footprints get clipped by things that have nothing to do with them -- a
+#: contour band, a garden boundary running a few centimetres off the wall --
+#: and the leftover strip becomes its own sector at roof height. With ground on
+#: both sides it renders as a freestanding brick fin, tens of metres long and a
+#: few centimetres thick, with no building behind it.
+#:
+#: 1m is chosen to sit clear of both ends: the fins measured 0.1m to 0.5m, and
+#: the narrowest genuine building part in the region is a 1.6m porch.
+MIN_BUILDING_WIDTH = 1.0 * UNITS_PER_METRE
 ROAD_LIGHT = 200  # in the lee of buildings and kerbs more often than not
 WATER_LIGHT = 216
 
@@ -505,6 +517,7 @@ def build_tile(
                 wall_tex=wall,
                 light=ROOF_LIGHT,
                 wall_scale_y=scale_y,
+                min_width=MIN_BUILDING_WIDTH,
             )
         )
         stats.buildings += 1

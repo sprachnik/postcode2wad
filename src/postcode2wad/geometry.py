@@ -61,6 +61,18 @@ class SectorSpec:
     #: Legitimately narrow, so exempt from sliver absorption. A fence really is
     #: 15cm wide; without this flag it would be merged into the ground.
     thin: bool = False
+    #: Narrowest this spec is ever legitimately allowed to be, in map units.
+    #: `None` means the arrangement-wide sliver threshold applies.
+    #:
+    #: A building sets this, because unlike a kerb or a verge it has a floor on
+    #: how thin it can honestly be. Where a footprint gets clipped by something
+    #: unrelated -- a contour band, a garden boundary -- the offcut is a strip
+    #: of roof a few centimetres thick standing 10m up, and it renders as a
+    #: freestanding brick fin with open ground on both sides and no building
+    #: behind it. 69 of those across the nine Birchington tiles, the worst 24m
+    #: long. They are too wide for the general sliver threshold, and raising
+    #: *that* to catch them would swallow kerbs, which are meant to be narrow.
+    min_width: float | None = None
     #: Follow the ground continuously instead of sitting flat. Faces belonging
     #: to a sloped spec are cut into triangles and given per-vertex heights, so
     #: the surface ramps rather than stepping.
@@ -634,32 +646,79 @@ def _absorb_slivers(
     slivers = [
         i
         for i, (face, spec) in enumerate(owned)
-        if not spec.thin and widths[i] < min_width and face.area > 0
+        if not spec.thin
+        and widths[i] < (min_width if spec.min_width is None else spec.min_width)
+        and face.area > 0
     ]
     if not slivers:
         return face_spec
 
-    neighbours: dict[int, list[int]] = {}
-    for uses in edges.values():
+    # How much boundary each pair of faces shares. The sliver joins whichever
+    # neighbour it mostly abuts, which is the one it has to be flush with to
+    # disappear.
+    #
+    # Picking the *widest* neighbour instead is the obvious rule and it is
+    # wrong, because a neighbour's own size says nothing about how much of the
+    # sliver touches it. A strip of roof clipped off a building, with grass
+    # along 90% of its length and one short join to the building it came from,
+    # went to the building -- staying at roof height with open ground on both
+    # sides, which is a brick fin standing in a garden. 54 of 60 such offcuts
+    # on this tile chose the building over the grass they were surrounded by.
+    shared: dict[int, dict[int, float]] = {}
+    for (p, q), uses in edges.items():
         if len(uses) != 2:
             continue
         a, b = uses[0][0], uses[1][0]
-        if a != b:
-            neighbours.setdefault(a, []).append(b)
-            neighbours.setdefault(b, []).append(a)
+        if a == b:
+            continue
+        length = math.dist(p, q)
+        shared.setdefault(a, {}).setdefault(b, 0.0)
+        shared.setdefault(b, {}).setdefault(a, 0.0)
+        shared[a][b] += length
+        shared[b][a] += length
 
     sliver_set = set(slivers)
     # Widest first, so a sliver that only touches other slivers is more likely
     # to find one that has already been resolved.
     for index in sorted(slivers, key=lambda i: -widths[i]):
-        candidates = [n for n in neighbours.get(index, []) if n not in sliver_set]
+        joins = shared.get(index, {})
+        candidates = {n: length for n, length in joins.items() if n not in sliver_set}
         if not candidates:
             # Entirely surrounded by slivers: settle for any neighbour rather
             # than leaving it stranded at its own height.
-            candidates = neighbours.get(index, [])
+            candidates = joins
         if not candidates:
             continue
-        face_spec[index] = face_spec[max(candidates, key=lambda n: widths[n])]
+        # Ties broken by the neighbour's own width, which is the old rule and a
+        # reasonable second opinion.
+        face_spec[index] = face_spec[max(candidates, key=lambda n: (candidates[n], widths[n]))]
+
+    # A building must be closed off by other building faces, or it is not a
+    # building -- it is a strip of roof standing on its own with the sky on
+    # both sides. The pass above gets nearly all of them, but a long offcut
+    # flanked by dozens of tiny ground slivers has no *resolved* neighbour to
+    # join except the building it was cut from, so it stays a fin.
+    #
+    # Resolving to a fixed point fixes that: once the ground slivers around it
+    # have taken the grass's spec, the offcut can see grass to join. Three
+    # passes settle it; the loop stops early when nothing moves.
+    for _pass in range(3):
+        moved = False
+        for index in slivers:
+            spec = face_spec[index]
+            if spec.min_width is None or widths[index] >= spec.min_width:
+                continue
+            joins = shared.get(index, {})
+            if not joins:
+                continue
+            same = sum(length for n, length in joins.items() if face_spec[n] is spec)
+            if same * 2 >= sum(joins.values()):
+                continue  # genuinely part of a building: leave it flush
+            other = {n: length for n, length in joins.items() if face_spec[n] is not spec}
+            face_spec[index] = face_spec[max(other, key=lambda n: (other[n], widths[n]))]
+            moved = True
+        if not moved:
+            break
 
     return face_spec
 
