@@ -30,6 +30,16 @@ SKY_CLEARANCE = 4096
 KERB_UNITS = 8
 WATER_DEPTH_UNITS = 20
 
+#: Sector light levels. The old default of 192 everywhere is interior gloom —
+#: correct for a bunker, wrong for a Tuesday afternoon in Kent. Depth now comes
+#: from MAPINFO fog (see pk3.py) rather than from darkening, so these can sit
+#: high without flattening the scene. The small spread between them is not
+#: physical, it just stops every surface in frame having identical value.
+DAYLIGHT = 208
+ROOF_LIGHT = 216  # unshaded, facing straight up
+ROAD_LIGHT = 200  # in the lee of buildings and kerbs more often than not
+WATER_LIGHT = 216
+
 PLAYER_START = 1
 
 PAVED_FOOTWAYS = {"footway", "path", "pedestrian", "steps", "cycleway", "bridleway"}
@@ -177,6 +187,7 @@ def build_tile(
             ceiling=sky_height,
             floor_tex=textures.GRASS,
             wall_tex=textures.TERRAIN_SIDE,
+            light=DAYLIGHT,
         )
     ]
 
@@ -188,6 +199,7 @@ def build_tile(
                 ceiling=sky_height,
                 floor_tex=textures.GRASS,
                 wall_tex=textures.TERRAIN_SIDE,
+                light=DAYLIGHT,
             )
         )
 
@@ -207,8 +219,8 @@ def build_tile(
                     floor=level - WATER_DEPTH_UNITS,
                     ceiling=sky_height,
                     floor_tex=textures.WATER,
-                    wall_tex=textures.TERRAIN_SIDE,
-                    light=176,
+                    wall_tex=textures.BANK,
+                    light=WATER_LIGHT,
                 )
             )
             stats.water += 1
@@ -227,6 +239,7 @@ def build_tile(
                         ceiling=sky_height,
                         floor_tex=textures.PAVEMENT if paved else textures.ROAD,
                         wall_tex=textures.KERB,
+                        light=ROAD_LIGHT,
                     )
                 )
                 stats.roads += 1
@@ -240,13 +253,17 @@ def build_tile(
             # Trust LIDAR when it gives a sane answer; fall back to OSM tags.
             if 2.0 <= measured <= 80.0:
                 height_m = measured
+        wall = textures.building_wall(shape.tags)
         specs.append(
             SectorSpec(
                 polygon=shape.polygon,
                 floor=round((ground_m + height_m) * UNITS_PER_METRE),
                 ceiling=sky_height,
                 floor_tex=textures.ROOF,
-                wall_tex=textures.building_wall(shape.tags),
+                wall_tex=wall,
+                light=ROOF_LIGHT,
+                wall_scale_x=textures.wall_scale(wall),
+                wall_scale_y=textures.wall_scale(wall),
             )
         )
         stats.buildings += 1

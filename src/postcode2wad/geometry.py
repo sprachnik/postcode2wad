@@ -51,6 +51,12 @@ class SectorSpec:
     ceil_tex: str = SKY_FLAT
     wall_tex: str = "BRICK7"
     light: int = 192
+    #: Texture repeats per default tiling. A Doom texture is mapped one pixel to
+    #: one map unit, so a 128px brick texture spans 4m of wall — which makes each
+    #: visible brick course roughly 40cm tall. Scaling up shrinks the texture and
+    #: gets the masonry back to a believable size. >1 means "repeat more".
+    wall_scale_x: float = 1.0
+    wall_scale_y: float = 1.0
 
 
 @dataclass
@@ -195,7 +201,11 @@ def build_geometry(
             # One-sided lines only ever occur on the tile perimeter — every
             # interior boundary has a face on both sides by construction.
             geo.sidedefs.append(
-                {"sector": face_sector[front_face], "texturemiddle": front_spec.wall_tex}
+                {
+                    "sector": face_sector[front_face],
+                    "texturemiddle": front_spec.wall_tex,
+                    **_scale(front_spec, "mid"),
+                }
             )
             line["blocking"] = True
             if horizon_border:
@@ -211,20 +221,17 @@ def build_geometry(
             # Same logic inverted for uppers: the lower ceiling is the overhang.
             soffit = front_spec if front_spec.ceiling <= back_spec.ceiling else back_spec
 
-            geo.sidedefs.append(
-                {
-                    "sector": face_sector[front_face],
-                    "texturebottom": riser.wall_tex,
-                    "texturetop": soffit.wall_tex,
-                }
-            )
-            geo.sidedefs.append(
-                {
-                    "sector": face_sector[back_face],
-                    "texturebottom": riser.wall_tex,
-                    "texturetop": soffit.wall_tex,
-                }
-            )
+            # Scale follows the spec that owns each texture, not the sidedef's
+            # own sector — otherwise a building wall seen from the grass gets the
+            # grass's scale and the brickwork stretches.
+            faces_of_line = {
+                "texturebottom": riser.wall_tex,
+                "texturetop": soffit.wall_tex,
+                **_scale(riser, "bottom"),
+                **_scale(soffit, "top"),
+            }
+            geo.sidedefs.append({"sector": face_sector[front_face], **faces_of_line})
+            geo.sidedefs.append({"sector": face_sector[back_face], **faces_of_line})
             line["sideback"] = sidefront + 1
             line["twosided"] = True
 
@@ -234,6 +241,21 @@ def build_geometry(
     geo.things = list(things or [])
     _drop_empty_sectors(geo)
     return geo
+
+
+def _scale(spec: SectorSpec, part: str) -> dict:
+    """UDMF scale keys for one of a sidedef's three texture slots.
+
+    Omitted entirely at 1.0, both to keep the TEXTMAP readable and because an
+    explicit `scalex_mid = 1.000` on every one of ~40k sidedefs is a lot of bytes
+    for no effect.
+    """
+    out = {}
+    if spec.wall_scale_x != 1.0:
+        out[f"scalex_{part}"] = float(spec.wall_scale_x)
+    if spec.wall_scale_y != 1.0:
+        out[f"scaley_{part}"] = float(spec.wall_scale_y)
+    return out
 
 
 def _drop_empty_sectors(geo: MapGeometry) -> int:

@@ -55,6 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--preview", metavar="PNG", help="also write a top-down plan view of the map"
     )
+    parser.add_argument(
+        "--fog",
+        type=int,
+        default=None,
+        metavar="DENSITY",
+        help="distance haze strength; 0 disables it (default: tuned for a 400m tile)",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -131,7 +138,14 @@ def main(argv: list[str] | None = None) -> int:
             "(c) Environment Agency copyright and/or database right."
         ),
     )
-    out = write_pk3(args.out, textmap, title=built.title)
+    from .pk3 import FOG_DENSITY
+
+    out = write_pk3(
+        args.out,
+        textmap,
+        title=built.title,
+        fog_density=FOG_DENSITY if args.fog is None else args.fog,
+    )
     print(f"wrote {out}")
 
     if args.preview:

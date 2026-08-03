@@ -27,7 +27,42 @@ BRICK_GREY = "A-BRICK1"
 BRICK_DARK = "BRICK5"
 STONE = "STONE2"
 KERB = "STONE2"
-TERRAIN_SIDE = "A-MUD"  # brown mud, for the cut faces of terrain steps
+
+#: The cut face of a terrain contour step.
+#:
+#: This was A-MUD, which drew every 0.5m contour as a brown band and turned a
+#: gently sloping field into a visible flight of stairs — the single most
+#: artificial thing in frame after the sky. Painting the risers with the same
+#: flat as the ground they interrupt makes them read as folds in the grass
+#: instead. It does not fix the staircase (that needs slopes, see the brief's
+#: research item 7) but it stops it announcing itself.
+#:
+#: ZDoom permits a flat as a wall texture, which vanilla Doom does not.
+TERRAIN_SIDE = GRASS
+#: Water's edge is a genuine cut bank, so it keeps an earth face.
+BANK = "A-MUD"
+
+#: Texture repeats per default tiling, by wall texture name.
+#:
+#: Doom maps one texture pixel to one map unit, so a 128px-tall texture covers
+#: 4m of wall. Freedoom's BRICK1 shows about ten courses over that, i.e. 40cm
+#: bricks — three times life size. Nobody consciously notices, but it is why the
+#: M1 screenshots read as "corridor wall" rather than "house": brick course
+#: height is one of the few absolute size references a viewer has outdoors.
+#:
+#: Irregular textures (mud, rubble) are left alone — they have no feature size
+#: to be wrong about, and scaling them just makes them noisier.
+WALL_SCALE = {
+    BRICK: 3.0,
+    BRICK_GREY: 3.0,
+    BRICK_DARK: 3.0,
+    STONE: 2.0,
+}
+
+
+def wall_scale(name: str) -> float:
+    return WALL_SCALE.get(name, 1.0)
+
 
 #: Wall texture per OSM building class, so a church doesn't look like a shed.
 BUILDING_WALLS = {

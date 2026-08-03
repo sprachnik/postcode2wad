@@ -16,11 +16,12 @@ dependencies = [
     "pyproj>=3.6",
     "rasterio>=1.3",
     "requests>=2.31",
+    # Not optional any more: every PK3 ships generated art (art.py).
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]
-preview = ["pillow>=10.0"]
-dev = ["pytest>=8.0", "ruff>=0.5", "pillow>=10.0"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.scripts]
 postcode2wad = "postcode2wad.cli:main"
