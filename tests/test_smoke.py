@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import collections
 import math
+import re
 from pathlib import Path
 
 import pytest
@@ -281,3 +282,34 @@ def test_generated_zscript_parses_map_numbers_as_base_ten(tile):
     script = build_zscript(tiles, [map_name(i, len(tiles)) for i in range(len(tiles))])
     assert ".ToInt(10)" in script, "map number parsing must specify base 10"
     assert ".ToInt()" not in script, "a base-less ToInt() will read '08' as octal"
+
+
+def test_plane_coefficients_survive_being_written_out(tile):
+    """A slope written to three decimals is not a slope.
+
+    Plane normals are unit vectors, so on ordinary ground the horizontal
+    components are tiny -- a 4% gradient gives ~0.04, gentler ground far less.
+    Formatted with "%.3f" they became "-0.000" and every plane emerged
+    perfectly flat at its own height, turning the terrain into a mosaic of
+    level triangles with a crack at every edge. It looked like a hillside from
+    a distance, which is why it survived so long.
+
+    The planes were correct everywhere in Python; only the file was wrong. So
+    this asserts on the *emitted text*, which is the only place the bug existed.
+    """
+    from postcode2wad.udmf import emit_textmap
+
+    text = emit_textmap(tile)
+    emitted = re.findall(r"floorplane_a = (-?[\d.eE+-]+);", text)
+    assert emitted, "no floor planes were emitted at all"
+
+    # Every plane that should be tilted must still be tilted on paper.
+    tilted_in_memory = sum(
+        1 for s in tile.sectors
+        if "floorplane_a" in s and abs(s["floorplane_a"]) > 1e-6
+    )
+    tilted_on_paper = sum(1 for v in emitted if abs(float(v)) > 1e-6)
+    assert tilted_on_paper >= tilted_in_memory * 0.99, (
+        f"{tilted_in_memory} planes are tilted in memory but only {tilted_on_paper} "
+        "survived being written out — the float format is destroying them"
+    )

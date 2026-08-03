@@ -23,19 +23,38 @@ from .geometry import MapGeometry, Thing
 NAMESPACE = "zdoom"
 
 
-def _value(value: object) -> str:
+#: Fields whose value is a direction rather than a distance, and which
+#: therefore cannot survive being rounded to three decimals.
+#:
+#: A slope plane is stored as a unit normal. On ground of any ordinary
+#: steepness the horizontal components are tiny -- a 4% gradient gives
+#: a ~0.04 normal component, and gentler ground far less -- so "%.3f" wrote
+#: them as "-0.000" and every plane came out perfectly flat at its own height.
+#: The terrain then rendered as a mosaic of level triangles: convincing as a
+#: hillside from a distance, and visibly shattered underfoot, with a crack at
+#: every triangle edge. Diagnosing it took a long time precisely because the
+#: planes were correct everywhere in Python and only died on the way out.
+PRECISE_FIELDS = ("floorplane_", "ceilingplane_")
+
+
+def _value(value: object, precise: bool = False) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, str):
         return f'"{value}"'
     if isinstance(value, float):
-        return f"{value:.3f}"
+        # 17 significant digits round-trips a double exactly; the plane fields
+        # are a handful per sector, so the size cost is irrelevant next to
+        # getting the geometry right.
+        return repr(value) if precise else f"{value:.3f}"
     return str(value)
 
 
 def _block(kind: str, fields: dict) -> str:
     body = " ".join(
-        f"{k} = {_value(v)};" for k, v in fields.items() if v is not None and v is not False
+        f"{k} = {_value(v, k.startswith(PRECISE_FIELDS))};"
+        for k, v in fields.items()
+        if v is not None and v is not False
     )
     return f"{kind} {{ {body} }}"
 
