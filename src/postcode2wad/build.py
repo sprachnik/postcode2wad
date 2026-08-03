@@ -372,6 +372,8 @@ def build_tile(
     spawn: tuple[float, float] | None = None,
     osm_source: str = "auto",
     osm_extract: str | Path | None = None,
+    lidar_source: str = "auto",
+    lidar_dir: str | Path | None = None,
 ) -> BuiltMap:
     # Sloped ground is not bound by Doom's 24-unit climb limit, so the contour
     # step can be four times coarser — which is where the sector saving comes
@@ -392,8 +394,11 @@ def build_tile(
     base_elevation_m = 0.0
 
     if with_terrain:
-        dtm = lidar.fill_holes(lidar.fetch_dtm(tile.bbox_osgb, cache_dir, refresh))
-        dsm = lidar.fetch_dsm(tile.bbox_osgb, cache_dir, refresh)
+        dtm = lidar.fill_holes(
+            lidar.fetch_dtm(tile.bbox_osgb, cache_dir, refresh, lidar_source, lidar_dir),
+            where=f"tile {tile.id}",
+        )
+        dsm = lidar.fetch_dsm(tile.bbox_osgb, cache_dir, refresh, lidar_source, lidar_dir)
         # With slopes the bands stop carrying the height and become only a way
         # of spreading mesh vertices over the tile, so the 0.75m step ceiling no
         # longer applies and a much coarser step buys back the sectors that

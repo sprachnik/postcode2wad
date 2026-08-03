@@ -106,6 +106,30 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        # Spelled out rather than imported from sources.lidar, which would drag
+        # numpy into `--help`; test_cli pins the two lists together.
+        "--lidar-source",
+        choices=("auto", "local", "wcs"),
+        default="auto",
+        help=(
+            "where terrain comes from. 'auto' reads the local 5km grid mirror "
+            "under data/lidar/ when every square a tile touches is present, and "
+            "falls back to the Environment Agency WCS otherwise; 'local' "
+            "insists on the mirror; 'wcs' insists on the network. The two are "
+            "bit-identical, so this changes cost, never output"
+        ),
+    )
+    parser.add_argument(
+        "--lidar-dir",
+        metavar="DIR",
+        default=None,
+        help=(
+            "where the 5km LIDAR mirror lives. Defaults to "
+            "$POSTCODE2WAD_LIDAR_DIR, then to data/lidar. "
+            "Populate it with scripts/fetch-lidar.py"
+        ),
+    )
+    parser.add_argument(
         "--cache-dir", default="cache", metavar="DIR", help="where to cache API responses"
     )
     parser.add_argument(
@@ -146,10 +170,13 @@ def _run_region(args, place, cache_dir: Path, tile_options: dict) -> int:
     from .pk3 import FOG_DENSITY, write_region_pk3
     from .preview import render_minimap
     from .region import build_region
+    from .sources import lidar
     from .udmf import emit_textmap
 
-    def progress(index, total, name, tile):
-        print(f"  [{index + 1}/{total}] {name}  {tile.id}", flush=True)
+    def progress(index, total, tile):
+        # The map name is not known yet: a tile that turns out to be open sea
+        # is dropped, and the pack is numbered from what survives.
+        print(f"  [{index + 1}/{total}] {tile.id}", flush=True)
 
     try:
         region = build_region(
@@ -165,6 +192,7 @@ def _run_region(args, place, cache_dir: Path, tile_options: dict) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 3
 
+    print(lidar.TALLY.note())
     print(region.summary())
 
     maps: list[tuple[str, str, str]] = []
@@ -266,10 +294,14 @@ def main(argv: list[str] | None = None) -> int:
         "spawn": spawn,
         "osm_source": args.osm_source,
         "osm_extract": args.osm_extract,
+        "lidar_source": args.lidar_source,
+        "lidar_dir": args.lidar_dir,
     }
 
     if args.region > 0:
         return _run_region(args, place, cache_dir, tile_options)
+
+    from .sources import lidar
 
     try:
         built = build_tile(
@@ -279,6 +311,9 @@ def main(argv: list[str] | None = None) -> int:
             refresh=args.refresh,
             **tile_options,
         )
+    except lidar.NoCoverageError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 4
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
@@ -286,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"tile {built.tile.id}  ({args.size}m square)")
     for note in built.stats.notes:
         print(note)
+    print(lidar.TALLY.note())
     print(built.stats.summary())
 
     textmap = emit_textmap(

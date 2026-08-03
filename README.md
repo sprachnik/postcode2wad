@@ -44,7 +44,8 @@ Still to come in M2: street-name signs and the geolocation HUD. See
 1. **postcodes.io** turns a postcode into OSGB eastings/northings (no key needed).
 2. That picks a **British National Grid tile** — generation is a pure function of the
    tile ID, so neighbouring tiles agree along their shared edge.
-3. **Environment Agency LIDAR** 1m DTM and DSM arrive as GeoTIFF over WCS.
+3. **Environment Agency LIDAR** 1m DTM and DSM arrive as float32 GeoTIFF — read out
+   of a local mirror of the EA's 5km grid squares if one is there, else over WCS.
 4. **OpenStreetMap** supplies buildings, roads, water, coastline, land use and barriers,
    in a single query per tile — off a local `.osm.pbf` extract if there is one, else
    from the **Overpass API** (see "Building more than a few tiles" below).
@@ -100,6 +101,32 @@ Overpass otherwise), `local`, or `overpass`. `--osm-extract PATH` or `$POSTCODE2
 names the file; otherwise the first `data/*.osm.pbf` is used. Both readers produce
 byte-identical PK3s — that is pinned by `tests/test_osmpbf.py`.
 
+Terrain goes the same way. The EA publishes the same composite it serves over WCS as one
+GeoTIFF per **5km National Grid square**, and the two are bit-identical, so a mirror
+removes 2 round trips per tile — 11,686 of them for Kent:
+
+```
+python scripts/fetch-lidar.py --district Thanet          # 12 squares, 428 MB, 36s
+postcode2wad "CT1 2EH" --size 800 --out out/tile.pk3     # uses it automatically
+```
+
+5000m is not a multiple of the tile size, so a map tile straddles up to four squares and
+is mosaicked from windowed reads: **18ms median** against **2.3s** for the same square
+over WCS, cold. `--lidar-source` is `auto` (mirror when every square a tile needs is
+present, WCS otherwise), `local` (refuse the network), or `wcs`; `--lidar-dir` or
+`$POSTCODE2WAD_LIDAR_DIR` moves the store. Falling back is shouted at stderr and counted,
+because a county run that quietly went back to the network would look exactly like a
+successful one until it had taken a week.
+
+Two things to know before mirroring more:
+
+- **The 1m last-return DSM has no bulk raster for the TR square** — all 72 tiles,
+  covering Thanet, Canterbury and Dover, come back as metadata-only zips. It is an EA
+  packaging defect, not missing survey: the WCS serves the same pixels. Building heights
+  and trees therefore still come over the network east of the Medway.
+- **A tile with no LIDAR at all is sea**, and is skipped and recorded rather than filled
+  with flat ground. Over Kent's *land* the composite is gapless.
+
 ## Fixed technical decisions
 
 | Decision | Choice |
@@ -138,7 +165,7 @@ come back empty.
 ## Data sources and attribution
 
 - **Environment Agency** LIDAR composite 1m DTM/DSM — OGL v3.
-  *© Environment Agency copyright and/or database right. All rights reserved.*
+  *© Environment Agency copyright and/or database right 2022. All rights reserved.*
 - **postcodes.io** (ONS/OS/Royal Mail) — OGL v3.
   *Contains OS data © Crown copyright and database right.*
 - **OpenStreetMap** — ODbL. *© OpenStreetMap contributors.* A generated level is a

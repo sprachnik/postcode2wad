@@ -19,7 +19,10 @@ tools/
 !tests/fixtures/*.wad
 cache/
 out/
+# Bulk source data: the Geofabrik .osm.pbf and the 5km LIDAR mirror. Kent's
+# terrain alone is ~10 GB of GeoTIFF, fetched by scripts/fetch-lidar.py.
 data/
+*.tif
 
 # Editors / OS
 .vscode/

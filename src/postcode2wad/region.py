@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .build import BuiltMap, build_tile
-from .sources import osm
+from .sources import lidar, osm
 from .sources.postcodes import Place
 from .tiles import Tile, osgb_to_lonlat
 
@@ -90,6 +90,9 @@ class Region:
     tiles: list[RegionTile] = field(default_factory=list)
     radius: int = 1
     size_m: int = 400
+    #: (tile, why) for every square that was deliberately not built. Today the
+    #: only reason is open sea; see `build_region`.
+    skipped: list[tuple[Tile, str]] = field(default_factory=list)
 
     @property
     def span_m(self) -> int:
@@ -99,10 +102,15 @@ class Region:
         sectors = sum(t.built.stats.sectors for t in self.tiles)
         lines = sum(t.built.stats.linedefs for t in self.tiles)
         side = self.radius * 2 + 1
-        return (
+        text = (
             f"{len(self.tiles)} tiles ({side}x{side}, {self.span_m}m across), "
             f"{sectors} sectors, {lines} linedefs total"
         )
+        if self.skipped:
+            text += f"\n{len(self.skipped)} tiles skipped:"
+            for tile, why in self.skipped:
+                text += f"\n  {tile.id}  {why}"
+        return text
 
 
 def build_region(
@@ -146,21 +154,42 @@ def build_region(
     for dy in range(-radius, radius + 1):
         for dx in range(-radius, radius + 1):
             tile = centre.neighbour(dx, dy)
-            name = map_name(index, side * side)
             if progress:
-                progress(index, side * side, name, tile)
-
-            built = build_tile(
-                place,
-                size_m=size_m,
-                cache_dir=cache_dir,
-                refresh=refresh,
-                tile=tile,
-                features=features,
-                **tile_options,
-            )
-            built.stats.notes.append(osm.describe(chosen, extract))
-            region.tiles.append(RegionTile(tile=tile, map_name=name, built=built))
+                progress(index, side * side, tile)
             index += 1
+
+            try:
+                built = build_tile(
+                    place,
+                    size_m=size_m,
+                    cache_dir=cache_dir,
+                    refresh=refresh,
+                    tile=tile,
+                    features=features,
+                    **tile_options,
+                )
+            except lidar.NoCoverageError as exc:
+                # A square with no LIDAR at all is open sea. Filling it would
+                # lay a flat plate of ground on the Channel, and raising would
+                # kill a county run at whichever tile first went offshore, so
+                # it is recorded and left out of the pack.
+                region.skipped.append((tile, str(exc)))
+                continue
+
+            built.stats.notes.append(osm.describe(chosen, extract))
+            region.tiles.append(RegionTile(tile=tile, map_name="", built=built))
+
+    if not region.tiles:
+        raise ValueError(
+            f"every one of the {side * side} tiles was skipped: "
+            + "; ".join(f"{t.id} {why}" for t, why in region.skipped)
+        )
+
+    # Names come last because skipping a sea tile has to leave the pack
+    # contiguous: MAP01..MAPnn with a gap is a pack GZDoom's own menu cannot
+    # start, and `build_zscript` navigates by grid index anyway, so a missing
+    # neighbour simply has no transition into it.
+    for position, entry in enumerate(region.tiles):
+        entry.map_name = map_name(position, len(region.tiles))
 
     return region

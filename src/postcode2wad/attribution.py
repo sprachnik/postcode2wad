@@ -52,7 +52,7 @@ tile is also retained by the generator's cache and available on request.
 --- Environment Agency LIDAR ----------------------------------------------
 1m composite DTM and DSM: ground heights, building heights, tree canopy.
 
-  (c) Environment Agency copyright and/or database right. All rights reserved.
+  (c) Environment Agency copyright and/or database right 2022. All rights reserved.
 
 Licensed under the Open Government Licence v3.0:
   https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
