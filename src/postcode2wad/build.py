@@ -404,6 +404,7 @@ def build_tile(
                         else textures.CONCRETE,
                         wall_tex=wall,
                         light=DAYLIGHT,
+                        thin=True,   # a fence is meant to be this narrow
                     )
                 )
             stats.barriers += 1

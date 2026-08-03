@@ -122,3 +122,54 @@ def test_interior_orphan_lines_are_walls_not_horizons():
             or (v1[1] == v2[1] == 1000)
         )
         assert on_edge, f"horizon special on an interior line {v1}->{v2}"
+
+
+def test_hairline_slivers_adopt_a_neighbours_height():
+    """A sliver must end up flush, not standing at its own height.
+
+    Nearly-coincident input edges leave faces a few centimetres wide. Each one
+    otherwise becomes its own sector, and a 2cm sector a metre above what
+    surrounds it renders as a tall thin plane hanging in mid-air.
+    """
+    from shapely.geometry import Polygon
+
+    from postcode2wad.geometry import SectorSpec, build_geometry
+
+    ground = Polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)])
+    # Two large regions whose shared edge is 4 units apart, leaving a hairline
+    # strip between them at a third height.
+    left = Polygon([(0, 0), (500, 0), (500, 1000), (0, 1000)])
+    right = Polygon([(504, 0), (1000, 0), (1000, 1000), (504, 1000)])
+
+    geo = build_geometry(
+        [
+            SectorSpec(polygon=ground, floor=200, ceiling=4096, floor_tex="GRASS1"),
+            SectorSpec(polygon=left, floor=0, ceiling=4096, floor_tex="GRASS1"),
+            SectorSpec(polygon=right, floor=0, ceiling=4096, floor_tex="GRASS1"),
+        ]
+    )
+
+    # The strip between them is 4 units wide, below the 8-unit threshold, so it
+    # must have taken a neighbour's floor rather than keeping the ground's 200.
+    heights = {s["heightfloor"] for s in geo.sectors}
+    assert heights == {0}, f"a sliver kept its own height: {sorted(heights)}"
+
+
+def test_specs_marked_thin_are_not_absorbed():
+    """A fence really is 15cm wide; absorbing it would delete it."""
+    from shapely.geometry import Polygon
+
+    from postcode2wad.geometry import SectorSpec, build_geometry
+
+    ground = Polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)])
+    fence = Polygon([(498, 100), (502, 100), (502, 900), (498, 900)])
+
+    geo = build_geometry(
+        [
+            SectorSpec(polygon=ground, floor=0, ceiling=4096, floor_tex="GRASS1"),
+            SectorSpec(
+                polygon=fence, floor=48, ceiling=4096, floor_tex="GRASS1", thin=True
+            ),
+        ]
+    )
+    assert 48 in {s["heightfloor"] for s in geo.sectors}, "the fence was absorbed away"

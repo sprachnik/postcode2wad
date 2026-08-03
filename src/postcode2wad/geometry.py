@@ -57,6 +57,9 @@ class SectorSpec:
     #: gets the masonry back to a believable size. >1 means "repeat more".
     wall_scale_x: float = 1.0
     wall_scale_y: float = 1.0
+    #: Legitimately narrow, so exempt from sliver absorption. A fence really is
+    #: 15cm wide; without this flag it would be merged into the ground.
+    thin: bool = False
 
 
 @dataclass
@@ -123,6 +126,10 @@ def build_geometry(
     #: sectors; `_drop_empty_sectors` still clears anything that loses all its
     #: edges to integer snapping.
     min_face_area: float = 0.0,
+    #: Faces narrower than this adopt a neighbour's height instead of standing
+    #: at their own. 8 units is 25cm — below anything the generator means to
+    #: build, and above the arrangement noise it is there to remove.
+    min_sliver_width: float = 8.0,
     horizon_border: bool = True,
 ) -> MapGeometry:
     """Arrange overlapping SectorSpecs into Doom-legal sector topology."""
@@ -160,27 +167,6 @@ def build_geometry(
     if not owned:
         raise ValueError("no face fell inside any SectorSpec")
 
-    geo = MapGeometry()
-    verts = _VertexTable()
-
-    # One sector per face. Merging co-planar neighbours is a later optimisation;
-    # correctness first.
-    face_sector: list[int] = []
-    face_spec: list[SectorSpec] = []
-    for face, spec in owned:
-        face_sector.append(len(geo.sectors))
-        face_spec.append(spec)
-        geo.faces.append(face)
-        geo.sectors.append(
-            {
-                "heightfloor": spec.floor,
-                "heightceiling": spec.ceiling,
-                "texturefloor": spec.floor_tex,
-                "textureceiling": spec.ceil_tex,
-                "lightlevel": spec.light,
-            }
-        )
-
     # Collect directed ring segments. Face interior is always on the LEFT of p->q.
     edges: dict[tuple[Coord, Coord], list[tuple[int, Coord, Coord]]] = {}
     for face_idx, (face, _spec) in enumerate(owned):
@@ -193,6 +179,29 @@ def build_geometry(
                     continue  # collapsed by integer snapping
                 key = (a, b) if a <= b else (b, a)
                 edges.setdefault(key, []).append((face_idx, a, b))
+
+    face_spec = _absorb_slivers(owned, edges, min_sliver_width)
+
+    geo = MapGeometry()
+    verts = _VertexTable()
+
+    # One sector per face. Merging co-planar neighbours outright is a later
+    # optimisation; adjacent faces sharing a spec already render as one surface
+    # because the line between them has no height difference to draw.
+    face_sector: list[int] = []
+    for index, (face, _owner) in enumerate(owned):
+        spec = face_spec[index]
+        face_sector.append(len(geo.sectors))
+        geo.faces.append(face)
+        geo.sectors.append(
+            {
+                "heightfloor": spec.floor,
+                "heightceiling": spec.ceiling,
+                "texturefloor": spec.floor_tex,
+                "textureceiling": spec.ceil_tex,
+                "lightlevel": spec.light,
+            }
+        )
 
     for uses in edges.values():
         if len(uses) > 2:
@@ -261,6 +270,77 @@ def build_geometry(
     geo.things = list(things or [])
     _drop_empty_sectors(geo)
     return geo
+
+
+def _width(polygon: Polygon) -> float:
+    """Rough width of a face: for a long thin strip, area over half-perimeter.
+
+    Exact enough to sort slivers from real faces, which is all it is for.
+    """
+    if polygon.length <= 0:
+        return 0.0
+    return 2.0 * polygon.area / polygon.length
+
+
+def _absorb_slivers(
+    owned: list[tuple[Polygon, SectorSpec]],
+    edges: dict,
+    min_width: float,
+) -> list[SectorSpec]:
+    """Give hair-thin faces the height of the neighbour they sit against.
+
+    Nearly-coincident input edges — a garden boundary that almost follows a
+    kerb, a contour band that almost follows a wall — leave slivers a few
+    centimetres wide in the arrangement. Each one becomes its own sector at its
+    own floor height, and a 2cm-wide sector standing a metre above what
+    surrounds it renders as a tall thin plane hanging in the air. A real tile
+    has hundreds.
+
+    Dropping them instead is worse and was the previous behaviour: a discarded
+    face leaves the edges it backed onto with a single user, and those render as
+    full-height walls or, with a horizon special, as holes in the world.
+
+    So they are kept as geometry and merely re-parented: a sliver adopts the
+    spec of its widest neighbour, which makes it flush and invisible while the
+    topology stays intact. Specs marked `thin` are exempt — a fence really is
+    15cm wide and merging it away would delete it.
+    """
+    face_spec = [spec for _face, spec in owned]
+    if min_width <= 0:
+        return face_spec
+
+    widths = [_width(face) for face, _spec in owned]
+    slivers = [
+        i
+        for i, (face, spec) in enumerate(owned)
+        if not spec.thin and widths[i] < min_width and face.area > 0
+    ]
+    if not slivers:
+        return face_spec
+
+    neighbours: dict[int, list[int]] = {}
+    for uses in edges.values():
+        if len(uses) != 2:
+            continue
+        a, b = uses[0][0], uses[1][0]
+        if a != b:
+            neighbours.setdefault(a, []).append(b)
+            neighbours.setdefault(b, []).append(a)
+
+    sliver_set = set(slivers)
+    # Widest first, so a sliver that only touches other slivers is more likely
+    # to find one that has already been resolved.
+    for index in sorted(slivers, key=lambda i: -widths[i]):
+        candidates = [n for n in neighbours.get(index, []) if n not in sliver_set]
+        if not candidates:
+            # Entirely surrounded by slivers: settle for any neighbour rather
+            # than leaving it stranded at its own height.
+            candidates = neighbours.get(index, [])
+        if not candidates:
+            continue
+        face_spec[index] = face_spec[max(candidates, key=lambda n: widths[n])]
+
+    return face_spec
 
 
 def _on_border(
