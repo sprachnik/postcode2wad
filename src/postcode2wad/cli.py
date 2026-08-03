@@ -45,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-water", action="store_true", help="skip water bodies")
     parser.add_argument("--no-trees", action="store_true", help="skip tree sprites")
     parser.add_argument(
+        "--slopes",
+        action="store_true",
+        help=(
+            "slope the ground instead of stepping it; implies a coarser contour "
+            "step, since the 24-unit climb limit no longer applies"
+        ),
+    )
+    parser.add_argument(
         "--no-hud", action="store_true", help="skip the minimap, compass and coordinate HUD"
     )
     parser.add_argument(
@@ -208,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         "with_landuse": not args.no_landuse,
         "with_barriers": not args.no_barriers,
         "with_trees": not args.no_trees,
+        "with_slopes": args.slopes,
     }
 
     if args.region > 0:
@@ -220,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
             cache_dir=cache_dir,
             refresh=args.refresh,
             contour_step_m=args.contour_step,
+            with_slopes=args.slopes,
             with_terrain=not args.no_terrain,
             with_roads=not args.no_roads,
             with_water=not args.no_water,

@@ -64,8 +64,15 @@ def emit_textmap(geo: MapGeometry, comment: str | None = None) -> str:
     if comment:
         lines[1:1] = [f"// {line}" for line in comment.splitlines()]
 
-    for x, y in geo.vertices:
-        lines.append(_block("vertex", {"x": float(x), "y": float(y)}))
+    # `zfloor` is what makes terrain slope. GZDoom applies it only to sectors
+    # with exactly three sides, so it is harmless on a vertex that a flat
+    # four-sided sector also happens to use.
+    for index, (x, y) in enumerate(geo.vertices):
+        fields = {"x": float(x), "y": float(y)}
+        height = geo.vertex_floor.get(index)
+        if height is not None:
+            fields["zfloor"] = float(height)
+        lines.append(_block("vertex", fields))
     lines.append("")
 
     for line in geo.linedefs:

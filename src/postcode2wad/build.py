@@ -30,7 +30,13 @@ from .features import (
 from .geometry import MapGeometry, SectorSpec, Thing, build_geometry
 from .sources import lidar, overpass
 from .sources.postcodes import Place
-from .terrain import contour_bands, ground_height_m, object_height_m, vegetation
+from .terrain import (
+    contour_bands,
+    ground_height_m,
+    height_sampler,
+    object_height_m,
+    vegetation,
+)
 from .tiles import Tile
 
 #: Headroom above the highest ground before the sky plane.
@@ -227,6 +233,7 @@ def build_tile(
     with_landuse: bool = True,
     with_barriers: bool = True,
     with_trees: bool = True,
+    with_slopes: bool = False,
     tile: Tile | None = None,
     features: overpass.TileFeatures | None = None,
 ) -> BuiltMap:
@@ -244,7 +251,13 @@ def build_tile(
     if with_terrain:
         dtm = lidar.fill_holes(lidar.fetch_dtm(tile.bbox_osgb, cache_dir, refresh))
         dsm = lidar.fetch_dsm(tile.bbox_osgb, cache_dir, refresh)
-        bands = contour_bands(dtm, tile, step_m=contour_step_m)
+        # With slopes the bands stop carrying the height and become only a way
+        # of spreading mesh vertices over the tile, so the 0.75m step ceiling no
+        # longer applies and a much coarser step buys back the sectors that
+        # triangulating costs.
+        bands = contour_bands(
+            dtm, tile, step_m=contour_step_m, allow_large_step=with_slopes
+        )
         stats.terrain_bands = len(bands)
         if bands:
             stats.elevation_range_m = (bands[0].elevation_m, bands[-1].elevation_m)
@@ -266,6 +279,7 @@ def build_tile(
             floor_tex=textures.GRASS,
             wall_tex=textures.TERRAIN_SIDE,
             light=DAYLIGHT,
+            sloped=with_slopes,
         )
     ]
 
@@ -278,6 +292,7 @@ def build_tile(
                 floor_tex=textures.GRASS,
                 wall_tex=textures.TERRAIN_SIDE,
                 light=DAYLIGHT,
+                sloped=with_slopes,
             )
         )
 
@@ -311,6 +326,7 @@ def build_tile(
                         # a contour step in a ploughed field is ploughed too.
                         wall_tex=flat,
                         light=DAYLIGHT,
+                        sloped=with_slopes,
                     )
                 )
             stats.landuse += 1
@@ -344,6 +360,7 @@ def build_tile(
                         floor_tex=textures.SAND,
                         wall_tex=textures.SAND,
                         light=DAYLIGHT,
+                        sloped=with_slopes,
                     )
                 )
             stats.beach += 1
@@ -383,6 +400,7 @@ def build_tile(
                         floor_tex=textures.PAVEMENT if paved else textures.ROAD,
                         wall_tex=textures.KERB,
                         light=ROAD_LIGHT,
+                        sloped=with_slopes,
                     )
                 )
                 stats.roads += 1
@@ -454,7 +472,11 @@ def build_tile(
             )
             stats.trees += 1
 
-    geometry = build_geometry(specs, things=things)
+    geometry = build_geometry(
+        specs,
+        things=things,
+        height_at=height_sampler(dtm, tile) if (with_slopes and dtm is not None) else None,
+    )
 
     stats.sectors = len(geometry.sectors)
     stats.linedefs = len(geometry.linedefs)

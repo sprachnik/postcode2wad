@@ -53,18 +53,53 @@ MAX_STEP_UNITS = 24
 MAX_CONTOUR_STEP_M = MAX_STEP_UNITS / UNITS_PER_METRE  # 0.75
 
 
+def height_sampler(dtm: Raster, tile: Tile):
+    """A fast map-units -> floor-units lookup, for per-vertex terrain heights.
+
+    Nearest pixel, not bilinear, and deliberately so: this is called once per
+    mesh vertex and the DTM is already 1m, finer than anything the geometry
+    resolves. `ground_height_m` rasterises a polygon mask per call and is orders
+    of magnitude too slow for this.
+    """
+    values = dtm.values
+    rows, cols = values.shape
+    origin_e, origin_n = tile.origin
+    fallback = float(np.nanmedian(values))
+
+    def at(x: float, y: float) -> float:
+        e = origin_e + x / UNITS_PER_METRE
+        n = origin_n + y / UNITS_PER_METRE
+        col = int((e - dtm.min_e) / dtm.pixel_m)
+        row = int((dtm.max_n - n) / dtm.pixel_m)
+        if not (0 <= row < rows and 0 <= col < cols):
+            return fallback * UNITS_PER_METRE
+        value = values[row, col]
+        if not np.isfinite(value):
+            value = fallback
+        return float(value) * UNITS_PER_METRE
+
+    return at
+
+
 def contour_bands(
     dtm: Raster,
     tile: Tile,
     step_m: float = 0.5,
     simplify_m: float = 1.2,
     min_area_m2: float = 30.0,
+    allow_large_step: bool = False,
 ) -> list[TerrainBand]:
-    """Quantise a DTM into absolute elevation bands and polygonise each."""
+    """Quantise a DTM into absolute elevation bands and polygonise each.
+
+    With sloped terrain the bands stop being the height model and become only a
+    way of spreading vertices over the tile, so the step limit no longer applies
+    -- hence `allow_large_step`. A coarser step then means far fewer bands for
+    the same visual result, which is where sloping actually pays for itself.
+    """
     from rasterio.features import shapes
     from rasterio.transform import Affine
 
-    if step_m > MAX_CONTOUR_STEP_M:
+    if step_m > MAX_CONTOUR_STEP_M and not allow_large_step:
         raise ValueError(
             f"contour step {step_m}m is {step_m * UNITS_PER_METRE:.0f} map units, above Doom's "
             f"{MAX_STEP_UNITS}-unit step limit — the player could not climb the terrain. "

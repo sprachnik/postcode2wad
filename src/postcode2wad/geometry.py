@@ -60,6 +60,10 @@ class SectorSpec:
     #: Legitimately narrow, so exempt from sliver absorption. A fence really is
     #: 15cm wide; without this flag it would be merged into the ground.
     thin: bool = False
+    #: Follow the ground continuously instead of sitting flat. Faces belonging
+    #: to a sloped spec are cut into triangles and given per-vertex heights, so
+    #: the surface ramps rather than stepping.
+    sloped: bool = False
 
 
 @dataclass
@@ -83,6 +87,10 @@ class MapGeometry:
     #: The arrangement face behind each sector, parallel to `sectors`. Not part
     #: of the UDMF output — kept for the top-down preview renderer.
     faces: list[Polygon] = field(default_factory=list)
+    #: Per-vertex floor height, by vertex index. Only vertices belonging to a
+    #: sloped triangle appear here; everything else is flat and takes its
+    #: sector's `heightfloor`.
+    vertex_floor: dict[int, float] = field(default_factory=dict)
 
     def stats(self) -> str:
         return (
@@ -105,6 +113,9 @@ class _VertexTable:
             self._index[key] = len(self.coords)
             self.coords.append(key)
         return self._index[key]
+
+    def index_of(self, key: Coord) -> int | None:
+        return self._index.get(key)
 
 
 def _rings(poly: Polygon) -> list[list[tuple[float, float]]]:
@@ -131,6 +142,9 @@ def build_geometry(
     #: build, and above the arrangement noise it is there to remove.
     min_sliver_width: float = 8.0,
     horizon_border: bool = True,
+    #: Ground height in map units at a map-unit position. Required for sloped
+    #: specs and ignored otherwise.
+    height_at=None,
 ) -> MapGeometry:
     """Arrange overlapping SectorSpecs into Doom-legal sector topology."""
     if not specs:
@@ -167,6 +181,8 @@ def build_geometry(
     if not owned:
         raise ValueError("no face fell inside any SectorSpec")
 
+    owned = _triangulate_sloped(owned)
+
     # Collect directed ring segments. Face interior is always on the LEFT of p->q.
     edges: dict[tuple[Coord, Coord], list[tuple[int, Coord, Coord]]] = {}
     for face_idx, (face, _spec) in enumerate(owned):
@@ -185,6 +201,20 @@ def build_geometry(
     geo = MapGeometry()
     verts = _VertexTable()
 
+    # A sloped face takes its height from its vertices, so its sector's own
+    # heightfloor is only a fallback -- but the riser logic below compares floor
+    # heights to decide which side of a two-sided line is standing up, and for
+    # sloped ground that has to be the real local height, not the spec's.
+    face_floor: list[int] = []
+    for index, (face, _owner) in enumerate(owned):
+        spec = face_spec[index]
+        if spec.sloped and height_at is not None:
+            ring = list(face.exterior.coords)[:-1]
+            heights = [height_at(x, y) for x, y in ring]
+            face_floor.append(round(sum(heights) / len(heights)) if heights else spec.floor)
+        else:
+            face_floor.append(spec.floor)
+
     # One sector per face. Merging co-planar neighbours outright is a later
     # optimisation; adjacent faces sharing a spec already render as one surface
     # because the line between them has no height difference to draw.
@@ -195,7 +225,7 @@ def build_geometry(
         geo.faces.append(face)
         geo.sectors.append(
             {
-                "heightfloor": spec.floor,
+                "heightfloor": face_floor[index],
                 "heightceiling": spec.ceiling,
                 "texturefloor": spec.floor_tex,
                 "textureceiling": spec.ceil_tex,
@@ -246,7 +276,7 @@ def build_geometry(
             # next to grass must be painted with the building's texture, not the
             # grass's. Getting this backwards paints every wall in the terrain's
             # texture and the whole map looks like mud cliffs.
-            riser = front_spec if front_spec.floor >= back_spec.floor else back_spec
+            riser = front_spec if face_floor[front_face] >= face_floor[back_face] else back_spec
             # Same logic inverted for uppers: the lower ceiling is the overhang.
             soffit = front_spec if front_spec.ceiling <= back_spec.ceiling else back_spec
 
@@ -267,9 +297,57 @@ def build_geometry(
         geo.linedefs.append(line)
 
     geo.vertices = verts.coords
+
+    # Vertex heights, for the sloped triangles only. Written after the vertex
+    # table is final so every coordinate already has its index.
+    if height_at is not None:
+        sloped_coords: set[Coord] = set()
+        for index, (face, _owner) in enumerate(owned):
+            if not face_spec[index].sloped:
+                continue
+            for ring in _rings(face):
+                for x, y in ring:
+                    sloped_coords.add((round(x), round(y)))
+        for coord in sloped_coords:
+            vertex = verts.index_of(coord)
+            if vertex is not None:
+                geo.vertex_floor[vertex] = float(height_at(coord[0], coord[1]))
+
     geo.things = list(things or [])
     _drop_empty_sectors(geo)
     return geo
+
+
+def _triangulate_sloped(
+    owned: list[tuple[Polygon, SectorSpec]],
+) -> list[tuple[Polygon, SectorSpec]]:
+    """Cut every sloped face into triangles.
+
+    GZDoom slopes a floor from per-vertex heights only when the sector has
+    exactly three sides, so a sloped surface has to be a mesh. Constrained
+    Delaunay is the right tool: it triangulates without moving or adding
+    boundary vertices, so the mesh still lines up exactly with the flat faces
+    around it — an unconstrained triangulation would cut across concave
+    coastlines and holes.
+    """
+    import shapely
+
+    out: list[tuple[Polygon, SectorSpec]] = []
+    for face, spec in owned:
+        if not spec.sloped or len(face.exterior.coords) <= 4:
+            out.append((face, spec))
+            continue
+        try:
+            pieces = shapely.constrained_delaunay_triangles(face)
+        except shapely.errors.GEOSException:
+            # Degenerate face: keep it flat rather than losing it entirely.
+            out.append((face, spec))
+            continue
+        triangles = [
+            g for g in getattr(pieces, "geoms", []) if isinstance(g, Polygon) and g.area > 0
+        ]
+        out.extend((t, spec) for t in triangles) if triangles else out.append((face, spec))
+    return out
 
 
 def _width(polygon: Polygon) -> float:
