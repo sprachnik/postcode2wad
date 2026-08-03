@@ -181,8 +181,6 @@ def build_geometry(
     if not owned:
         raise ValueError("no face fell inside any SectorSpec")
 
-    owned = _triangulate_sloped(owned)
-
     # Collect directed ring segments. Face interior is always on the LEFT of p->q.
     edges: dict[tuple[Coord, Coord], list[tuple[int, Coord, Coord]]] = {}
     for face_idx, (face, _spec) in enumerate(owned):
@@ -223,15 +221,22 @@ def build_geometry(
         spec = face_spec[index]
         face_sector.append(len(geo.sectors))
         geo.faces.append(face)
-        geo.sectors.append(
-            {
-                "heightfloor": face_floor[index],
-                "heightceiling": spec.ceiling,
-                "texturefloor": spec.floor_tex,
-                "textureceiling": spec.ceil_tex,
-                "lightlevel": spec.light,
-            }
-        )
+        sector = {
+            "heightfloor": face_floor[index],
+            "heightceiling": spec.ceiling,
+            "texturefloor": spec.floor_tex,
+            "textureceiling": spec.ceil_tex,
+            "lightlevel": spec.light,
+        }
+        if spec.sloped and height_at is not None:
+            plane = _floor_plane(face, height_at)
+            if plane is not None:
+                a, b, c, d = plane
+                sector["floorplane_a"] = a
+                sector["floorplane_b"] = b
+                sector["floorplane_c"] = c
+                sector["floorplane_d"] = d
+        geo.sectors.append(sector)
 
     for uses in edges.values():
         if len(uses) > 2:
@@ -297,57 +302,45 @@ def build_geometry(
         geo.linedefs.append(line)
 
     geo.vertices = verts.coords
-
-    # Vertex heights, for the sloped triangles only. Written after the vertex
-    # table is final so every coordinate already has its index.
-    if height_at is not None:
-        sloped_coords: set[Coord] = set()
-        for index, (face, _owner) in enumerate(owned):
-            if not face_spec[index].sloped:
-                continue
-            for ring in _rings(face):
-                for x, y in ring:
-                    sloped_coords.add((round(x), round(y)))
-        for coord in sloped_coords:
-            vertex = verts.index_of(coord)
-            if vertex is not None:
-                geo.vertex_floor[vertex] = float(height_at(coord[0], coord[1]))
-
     geo.things = list(things or [])
     _drop_empty_sectors(geo)
     return geo
 
 
-def _triangulate_sloped(
-    owned: list[tuple[Polygon, SectorSpec]],
-) -> list[tuple[Polygon, SectorSpec]]:
-    """Cut every sloped face into triangles.
+def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] | None:
+    """Least-squares fit of the ground under a face, as a UDMF floor plane.
 
-    GZDoom slopes a floor from per-vertex heights only when the sector has
-    exactly three sides, so a sloped surface has to be a mesh. Constrained
-    Delaunay is the right tool: it triangulates without moving or adding
-    boundary vertices, so the mesh still lines up exactly with the flat faces
-    around it — an unconstrained triangulation would cut across concave
-    coastlines and holes.
+    GZDoom takes `floorplane_a..d` as a*x + b*y + c*z + d = 0 with (a,b,c) a
+    unit normal. Writing the surface as z = mx*x + my*y + h0 gives the normal
+    directly as (mx, my, -1), normalised.
+
+    This is per *sector*, which is the whole reason for preferring it to
+    per-vertex `zfloor`: vertex heights are shared, so GZDoom applies them to
+    any three-sided sector touching that vertex — which silently dragged 110
+    building roofs down to terrain height, up to 14m out, wherever a footprint
+    happened to triangulate into a triangle. A sector plane cannot leak onto a
+    neighbour, and needs no triangulation, so the mesh cost disappears too.
     """
-    import shapely
+    import numpy as np
 
-    out: list[tuple[Polygon, SectorSpec]] = []
-    for face, spec in owned:
-        if not spec.sloped or len(face.exterior.coords) <= 4:
-            out.append((face, spec))
-            continue
-        try:
-            pieces = shapely.constrained_delaunay_triangles(face)
-        except shapely.errors.GEOSException:
-            # Degenerate face: keep it flat rather than losing it entirely.
-            out.append((face, spec))
-            continue
-        triangles = [
-            g for g in getattr(pieces, "geoms", []) if isinstance(g, Polygon) and g.area > 0
-        ]
-        out.extend((t, spec) for t in triangles) if triangles else out.append((face, spec))
-    return out
+    ring = list(face.exterior.coords)[:-1]
+    if len(ring) < 3:
+        return None
+    # The centroid as well, so a long thin face is not fitted from its ends only.
+    probe = face.representative_point()
+    points = [*ring, (probe.x, probe.y)]
+
+    a_matrix = np.array([[x, y, 1.0] for x, y in points])
+    heights = np.array([height_at(x, y) for x, y in points])
+    try:
+        (mx, my, h0), *_ = np.linalg.lstsq(a_matrix, heights, rcond=None)
+    except np.linalg.LinAlgError:
+        return None
+    if not all(np.isfinite(v) for v in (mx, my, h0)):
+        return None
+
+    norm = float(np.sqrt(mx * mx + my * my + 1.0))
+    return (float(mx) / norm, float(my) / norm, -1.0 / norm, float(h0) / norm)
 
 
 def _width(polygon: Polygon) -> float:
