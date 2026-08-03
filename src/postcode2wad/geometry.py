@@ -30,6 +30,8 @@ from shapely.geometry import LineString, Polygon
 from shapely.geometry.polygon import orient
 from shapely.ops import polygonize, unary_union
 
+from . import UNITS_PER_METRE
+
 SKY_FLAT = "F_SKY1"
 
 #: GZDoom's Line_Horizon. A one-sided line with this special renders as an
@@ -460,10 +462,16 @@ def _width(polygon: Polygon) -> float:
     return 2.0 * polygon.area / polygon.length
 
 
+#: Faces smaller than this are arrangement artefacts -- two boundaries nearly
+#: touching -- rather than real ground, so a nonsense plane fit on one can be
+#: replaced without anything noticing. 8 m2 is about where that changes.
+SALVAGE_BELOW_AREA = 8.0 * 32 * 32
+
 #: A ground plane steeper than this is not terrain, it is an artefact of three
 #: corners that happen to straddle a sharp feature or sit almost in a line.
 #: 45 degrees is already steeper than anything walkable.
 MAX_GRADIENT = 1.0
+
 
 
 def _floor_planes(
@@ -516,15 +524,42 @@ def _floor_planes(
             planes.append(plane)
             continue
 
-        scale = MAX_GRADIENT / gradient
+        # Only slivers get salvaged. Every salvage breaks the exact-corner fit
+        # that makes neighbours meet -- the plane no longer passes through the
+        # shared corners -- so it steps the face's entire perimeter. On a sliver
+        # that perimeter is centimetres and nothing notices; on a large face it
+        # opened a 983 m2 hole in the walkable area. Large faces keep their fit
+        # even when it is steep: continuity is worth more, and a big face with a
+        # genuinely steep fit is usually a genuinely steep bank.
+        if face.area >= SALVAGE_BELOW_AREA:
+            planes.append(plane)
+            continue
+
+        # Salvage a too-steep fit by measuring the ground instead of guessing
+        # from it. A fit this steep comes from three corners that are nearly
+        # collinear, or that straddle a step in the DTM, so neither its
+        # magnitude nor its direction means anything.
+        #
+        # Two rules were tried and both build walls out of nothing. Scaling the
+        # gradient back to 45 degrees keeps the meaningless direction and lays a
+        # ramp across flat ground: measured at one such face, 0.33m of real
+        # relief across 13m, with 2.4m walls built round it. Flattening outright
+        # leaves a step all the way round instead, and on a 64 m2 face that
+        # opened a 983 m2 hole in the walkable area.
+        #
+        # Central differences on the smoothed height field give the slope the
+        # ground actually has at that point. It is bounded because the field is
+        # smoothed, it needs no threshold, and it is right on flat ground and on
+        # a real bank alike.
+        step = float(UNITS_PER_METRE)
+        local_x = (height_at(probe.x + step, probe.y) - height_at(probe.x - step, probe.y)) / (
+            2 * step
+        )
+        local_y = (height_at(probe.x, probe.y + step) - height_at(probe.x, probe.y - step)) / (
+            2 * step
+        )
         planes.append(
-            _plane_through(
-                slope_x * scale,
-                slope_y * scale,
-                probe.x,
-                probe.y,
-                height_at(probe.x, probe.y),
-            )
+            _plane_through(local_x, local_y, probe.x, probe.y, height_at(probe.x, probe.y))
         )
     return planes
 
