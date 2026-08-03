@@ -241,6 +241,22 @@ class PostcodeHUD : StaticEventHandler
 
     int tlmTick;
     int stuckTicks;
+    //: Which 45-degree octants the player has faced while failing to move.
+    //: Pressing into a wall fails in one direction; being trapped fails in all
+    //: of them, and that is the only thing that distinguishes the two. Without
+    //: it the detector fires every time someone walks into a building, which is
+    //: constantly.
+    int stuckDirs;
+
+    int CountOctants(int mask)
+    {{
+        int n = 0;
+        for (int i = 0; i < 8; i++)
+        {{
+            if (mask & (1 << i)) n++;
+        }}
+        return n;
+    }}
 
     String FmtLatLng(double x, double y)
     {{
@@ -265,6 +281,8 @@ class PostcodeHUD : StaticEventHandler
         if (pushing && spd < 2.0 && p.mo.health > 0)
         {{
             stuckTicks++;
+            int octant = int(((p.mo.angle % 360) + 360) % 360 / 45) & 7;
+            stuckDirs |= (1 << octant);
         }}
         else if (stuckTicks < 0)
         {{
@@ -273,14 +291,20 @@ class PostcodeHUD : StaticEventHandler
         else
         {{
             stuckTicks = 0;
+            stuckDirs = 0;
         }}
 
-        if (stuckTicks == 35)
+        // A second of no progress across at least three octants -- 90 degrees
+        // or more of attempted escape, all refused.
+        if (stuckTicks >= 35 && CountOctants(stuckDirs) >= 3)
         {{
-            Console.Printf("P2W STUCK map=%s x=%.0f y=%.0f %s ang=%.0f fwd=%d side=%d",
+            Console.Printf(
+                "P2W STUCK map=%s x=%.0f y=%.0f %s ang=%.0f dirs=%d fwd=%d side=%d",
                 level.MapName, p.mo.pos.x, p.mo.pos.y,
-                FmtLatLng(p.mo.pos.x, p.mo.pos.y), p.mo.angle, fwd, side);
+                FmtLatLng(p.mo.pos.x, p.mo.pos.y), p.mo.angle,
+                CountOctants(stuckDirs), fwd, side);
             stuckTicks = -105;   // three seconds before it can fire again
+            stuckDirs = 0;
         }}
 
         // A breadcrumb roughly three times a second, and only while moving or

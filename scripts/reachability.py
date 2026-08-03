@@ -14,9 +14,20 @@ and the sloped planes were all blamed before measurement showed the geometry
 was fine and a solid tree actor was standing in the path. Sector reachability
 rules the geometry in or out in one run; anything left is a Thing.
 
-What good looks like: ~90% of area reachable, a frontier made only of building
-roofs (CEIL5_2), barrier tops (DMCONC / DMWOOD) and water, and unreachable
-*ground* under 1% — enclosed back gardens are real, walled-off streets are not.
+Read the POCKETS, not the percentage. Unreachable ground is not a defect to
+minimise: a courtyard ringed by buildings, a hedged back garden and a walled
+yard are all correctly unreachable, and the largest pocket on the Birchington
+tile is 4,000 m2 enclosed by 57 building faces — exactly right.
+
+What matters is what *encloses* each pocket. Bordered by roofs, hedges and
+fences: the map is working. Bordered mostly by open ground: something is
+walling off a street that should be walkable, and that is worth chasing.
+
+This distinction was missed for a while and cost real time — the raw percentage
+was treated as a score to drive down, which led to changes that made the map
+worse while making the number better. The percentage is a screening signal
+only; the walk test (`netevent walktest`) is the ground truth for whether the
+player can actually move.
 """
 
 from __future__ import annotations
@@ -106,21 +117,52 @@ def main() -> int:
         if i not in seen and geo.sectors[i].get("texturefloor") in GROUND
     )
 
-    frontier = collections.Counter()
-    for current in seen:
-        for other, mx, my, length in adjacency[current]:
-            if other in seen or length < MIN_GAP_UNITS:
-                continue
-            frontier[geo.sectors[other].get("texturefloor")] += 1
-
     print(f"{place.label}: {len(seen)}/{len(geo.sectors)} sectors reachable, "
           f"{100 * reached / total:.1f}% of area")
     print(f"unreachable ground: {100 * stuck_ground / total:.2f}% of the tile")
-    print("frontier:", dict(frontier.most_common(8)))
 
-    # Exit code for CI-ish use: unreachable ground over 2% means something is
-    # walled off that should not be.
-    return 1 if stuck_ground / total > 0.02 else 0
+    # Group the unreachable ground into contiguous pockets and classify each by
+    # what surrounds it. Enclosure is the signal; area is only context.
+    lost = {
+        i for i in range(len(geo.sectors))
+        if i not in seen and geo.sectors[i].get("texturefloor") in GROUND
+    }
+    pockets = []
+    remaining = set(lost)
+    while remaining:
+        seed = remaining.pop()
+        pocket, stack = [seed], [seed]
+        while stack:
+            current = stack.pop()
+            for other, _mx, _my, _len in adjacency[current]:
+                if other in remaining:
+                    remaining.discard(other)
+                    pocket.append(other)
+                    stack.append(other)
+        pockets.append(pocket)
+
+    suspect = []
+    for pocket in pockets:
+        border = collections.Counter()
+        for i in pocket:
+            for other, _mx, _my, _len in adjacency[i]:
+                if other not in pocket:
+                    border[geo.sectors[other].get("texturefloor")] += 1
+        ground_edges = sum(n for tex, n in border.items() if tex in GROUND)
+        area = sum(geo.faces[i].area for i in pocket) / 1024
+        # Mostly ground around it means it is not enclosed by anything real.
+        if border and ground_edges / sum(border.values()) > 0.75 and area > 20:
+            suspect.append((area, len(pocket), dict(border.most_common(3))))
+
+    suspect.sort(reverse=True)
+    print(f"pockets: {len(pockets)}; enclosed by real obstacles: "
+          f"{len(pockets) - len(suspect)}; open-bordered (suspect): {len(suspect)}")
+    for area, faces, border in suspect[:5]:
+        print(f"   SUSPECT {area:7.0f} m2, {faces:3d} faces, bordered by {border}")
+
+    # Only open-bordered pockets are a defect. A courtyard ringed by buildings
+    # is the map being right.
+    return 1 if suspect else 0
 
 
 if __name__ == "__main__":

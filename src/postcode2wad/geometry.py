@@ -198,6 +198,7 @@ def build_geometry(
                 edges.setdefault(key, []).append((face_idx, a, b))
 
     face_spec = _absorb_slivers(owned, edges, min_sliver_width)
+    face_plane = _floor_planes(owned, face_spec, edges, height_at, min_sliver_width)
 
     geo = MapGeometry()
     verts = _VertexTable()
@@ -209,7 +210,14 @@ def build_geometry(
     face_floor: list[int] = []
     for index, (face, _owner) in enumerate(owned):
         spec = face_spec[index]
-        if spec.sloped and height_at is not None:
+        plane = face_plane[index]
+        if plane is not None:
+            # Sit the sector's nominal height on its own plane, so the riser
+            # logic below compares like with like.
+            probe = face.representative_point()
+            a, b, c, d = plane
+            face_floor.append(round(-(a * probe.x + b * probe.y + d) / c))
+        elif spec.sloped and height_at is not None:
             ring = list(face.exterior.coords)[:-1]
             heights = [height_at(x, y) for x, y in ring]
             face_floor.append(round(sum(heights) / len(heights)) if heights else spec.floor)
@@ -231,14 +239,16 @@ def build_geometry(
             "textureceiling": spec.ceil_tex,
             "lightlevel": spec.light,
         }
-        if spec.sloped and height_at is not None:
-            plane = _floor_plane(face, height_at)
-            if plane is not None:
-                a, b, c, d = plane
-                sector["floorplane_a"] = a
-                sector["floorplane_b"] = b
-                sector["floorplane_c"] = c
-                sector["floorplane_d"] = d
+        # Index it here rather than reusing a name from the loop above: doing
+        # that silently read the *last* face's plane for every sector, which
+        # was None, and flattened the entire map without an error anywhere.
+        plane = face_plane[index]
+        if plane is not None:
+            a, b, c, d = plane
+            sector["floorplane_a"] = a
+            sector["floorplane_b"] = b
+            sector["floorplane_c"] = c
+            sector["floorplane_d"] = d
         geo.sectors.append(sector)
 
     for uses in edges.values():
@@ -448,6 +458,90 @@ def _width(polygon: Polygon) -> float:
     if polygon.length <= 0:
         return 0.0
     return 2.0 * polygon.area / polygon.length
+
+
+#: A ground plane steeper than this is not terrain, it is an artefact of three
+#: corners that happen to straddle a sharp feature or sit almost in a line.
+#: 45 degrees is already steeper than anything walkable.
+MAX_GRADIENT = 1.0
+
+
+def _floor_planes(
+    owned: list[tuple[Polygon, SectorSpec]],
+    face_spec: list[SectorSpec],
+    edges: dict,
+    height_at,
+    min_width: float,
+) -> list[tuple[float, float, float, float] | None]:
+    """A floor plane per face, with runaway gradients flattened in place.
+
+    Three attempts at this, and the two failures are worth recording because
+    the middle path is not obvious.
+
+    *Rejecting* a steep fit made the face fall back to a flat average height,
+    and the steps that left against its sloped neighbours were harder barriers
+    than any slope: unreachable ground went 0.41% -> 2.14%.
+
+    *Inheriting* a neighbour's plane removed the shards but put the face at the
+    neighbour's height rather than its own, which just moved the steps to its
+    other edges: 2.13% unreachable, no better.
+
+    What works is to keep the face's own plane and clamp only what is wrong
+    with it. A sliver whose three corners sit almost in a line, or straddle a
+    wall in the DTM, fits a near-vertical plane -- gradients up to 64, which
+    render as shards spearing into the sky. Scaling the gradient back to
+    something walkable and re-anchoring the plane through the face's true
+    centroid height keeps it where the ground actually is, so neighbours still
+    meet it, and the shard is gone because the slope is bounded.
+    """
+    planes: list[tuple[float, float, float, float] | None] = []
+    for index, (face, _owner) in enumerate(owned):
+        spec = face_spec[index]
+        if not spec.sloped or height_at is None:
+            planes.append(None)
+            continue
+
+        plane = _floor_plane(face, height_at)
+        probe = face.representative_point()
+        if plane is None:
+            # No plane at all (collapsed corners): a horizontal one at the real
+            # ground height still beats leaving the sector at a spec default.
+            planes.append(_plane_through(0.0, 0.0, probe.x, probe.y, height_at(probe.x, probe.y)))
+            continue
+
+        a, b, c, _d = plane
+        slope_x, slope_y = -a / c, -b / c
+        gradient = (slope_x * slope_x + slope_y * slope_y) ** 0.5
+        if gradient <= MAX_GRADIENT:
+            planes.append(plane)
+            continue
+
+        scale = MAX_GRADIENT / gradient
+        planes.append(
+            _plane_through(
+                slope_x * scale,
+                slope_y * scale,
+                probe.x,
+                probe.y,
+                height_at(probe.x, probe.y),
+            )
+        )
+    return planes
+
+
+def _plane_through(
+    slope_x: float, slope_y: float, x: float, y: float, z: float
+) -> tuple[float, float, float, float]:
+    """UDMF plane for z = slope_x*x + slope_y*y + h, passing through (x, y, z).
+
+    Normalised with c positive, because the floor normal must point up into the
+    sector: a downward normal renders identically and the player even stands at
+    the right height, but the physics treats everything above it as solid and
+    refuses all horizontal movement.
+    """
+    norm = (slope_x * slope_x + slope_y * slope_y + 1.0) ** 0.5
+    a, b, c = -slope_x / norm, -slope_y / norm, 1.0 / norm
+    return (a, b, c, -(a * x + b * y + c * z))
 
 
 def _absorb_slivers(
