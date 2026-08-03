@@ -336,7 +336,10 @@ def build_tile(
             # Trust LIDAR when it gives a sane answer; fall back to OSM tags.
             if 2.0 <= measured <= 80.0:
                 height_m = measured
-        wall = textures.building_wall(shape.tags)
+        # The façade covers the wall exactly once, so scaley depends on the
+        # building's measured height. scalex stays 1: the texture is authored at
+        # 32 px/m horizontally, which is already map scale.
+        wall, scale_y = textures.building_facade(shape.tags, shape.osm_id, height_m)
         specs.append(
             SectorSpec(
                 polygon=shape.polygon,
@@ -345,8 +348,7 @@ def build_tile(
                 floor_tex=textures.ROOF,
                 wall_tex=wall,
                 light=ROOF_LIGHT,
-                wall_scale_x=textures.wall_scale(wall),
-                wall_scale_y=textures.wall_scale(wall),
+                wall_scale_y=scale_y,
             )
         )
         stats.buildings += 1

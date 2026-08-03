@@ -80,6 +80,9 @@ class Shape:
     polygon: Polygon
     tags: dict[str, str]
     height_m: float = 0.0
+    #: The OSM way/relation it came from. Used to pick a stable façade material
+    #: per building, so a street varies but regenerating the tile does not.
+    osm_id: int = 0
 
     @property
     def name(self) -> str:
@@ -186,7 +189,12 @@ def buildings_to_shapes(
             if part.area < min_area_units:
                 continue
             shapes.append(
-                Shape(polygon=part, tags=feature.tags, height_m=building_height(feature.tags))
+                Shape(
+                    polygon=part,
+                    tags=feature.tags,
+                    height_m=building_height(feature.tags),
+                    osm_id=feature.osm_id,
+                )
             )
     return shapes
 

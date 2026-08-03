@@ -304,6 +304,182 @@ def fence_png(seed: int = 1) -> bytes:
     return _encode(rgb)
 
 
+#: Façade geometry, all of it derived from real dimensions.
+#:
+#: A texture covers one 8m width of frontage and the *whole* height of the wall,
+#: which is the trick that makes this work. Doom draws a lower texture downward
+#: from the top of the riser, so if the texture is exactly as tall as the wall
+#: then the top row lands on the eaves and the bottom row on the pavement — and
+#: every window in between sits at the height it should. `build.py` sets
+#: scaley to make that true for each building's measured height.
+#:
+#: 8m rather than 4m so that one door appears per frontage instead of one every
+#: four metres, which reads as a row of front doors on a detached house.
+FACADE_WIDTH = 256  # px, = 8m at 32 px/m
+STOREY_PX = 128  # px per storey; a storey is 3.1m, so ~41 px/m vertically
+BAYS = 4  # 2m per bay
+MAX_STOREYS = 4
+
+STOREY_M = 3.1
+
+
+@dataclass(frozen=True)
+class Facade:
+    """A wall material. `courses` is the brick/block size in metres, or None
+    for render and pebbledash, which have no coursing at all."""
+
+    key: str
+    brick: tuple[int, int, int]
+    mortar: tuple[int, int, int]
+    trim: tuple[int, int, int]
+    courses: tuple[float, float] | None = (0.215, 0.075)
+    #: Per-unit tone scatter. Stock brick is far more varied than machine brick.
+    scatter: float = 0.10
+
+
+FACADES = (
+    Facade("R", (138, 88, 74), (186, 180, 170), (238, 238, 234), scatter=0.11),
+    Facade("Y", (178, 160, 124), (198, 192, 180), (238, 238, 234), scatter=0.10),
+    Facade("N", (220, 216, 206), (220, 216, 206), (96, 96, 100), courses=None, scatter=0.03),
+    Facade("S", (156, 150, 136), (176, 172, 160), (86, 84, 80), courses=(0.45, 0.22), scatter=0.10),
+    Facade("G", (138, 138, 136), (168, 168, 164), (78, 78, 80), scatter=0.06),
+)
+FACADE_BY_KEY = {facade.key: facade for facade in FACADES}
+
+_GLASS = (74, 92, 104)
+_GLASS_SKY = (150, 178, 200)
+
+
+def facade_name(key: str, storeys: int) -> str:
+    return f"DMW{key}{storeys}"
+
+
+def facade_png(facade: Facade, storeys: int, seed: int = 1) -> bytes:
+    """One whole-wall façade texture: `storeys` storeys, 8m wide."""
+    rng = np.random.default_rng(seed)
+    w = FACADE_WIDTH
+    h = STOREY_PX * storeys
+    px_per_m_x = w / 8.0
+    px_per_m_y = STOREY_PX / STOREY_M
+
+    rgb = _masonry(rng, facade, h, w, px_per_m_x, px_per_m_y)
+
+    bay = w // BAYS
+    for storey in range(storeys):
+        # Storey 0 is the top of the texture, which is the top of the building.
+        top = storey * STOREY_PX
+        ground = storey == storeys - 1
+        for index in range(BAYS):
+            left = index * bay
+            # One bay of the ground floor is the front door.
+            if ground and index == 1:
+                _door(rgb, facade, top, left, bay, px_per_m_x, px_per_m_y)
+            else:
+                _window(rgb, facade, rng, top, left, bay, px_per_m_x, px_per_m_y)
+
+    _eaves(rgb, facade, px_per_m_y)
+    return _encode(rgb)
+
+
+def _masonry(rng, facade: Facade, h: int, w: int, px_x: float, px_y: float) -> np.ndarray:
+    """Brickwork, or flat render where the material has no coursing."""
+    base = np.array(facade.brick, dtype=float)
+    if facade.courses is None:
+        # Render still needs grain, or it reads as a solid colour swatch.
+        grain = _fbm(rng, h, w, cx=8, cy=8, octaves=3)
+        return base[None, None, :] * (0.94 + 0.12 * grain)[..., None]
+
+    length_m, height_m = facade.courses
+    unit_w = max(2, round(length_m * px_x))
+    unit_h = max(2, round(height_m * px_y))
+
+    rows = np.arange(h)[:, None]
+    cols = np.arange(w)[None, :]
+    course = rows // unit_h
+    # Stretcher bond: every other course offset by half a brick.
+    shifted = cols + (course % 2) * (unit_w // 2)
+    unit = shifted // unit_w
+
+    tone = rng.normal(1.0, facade.scatter, (h // unit_h + 2, w // unit_w + 2))
+    tone = np.clip(tone, 0.72, 1.28)
+    rgb = base[None, None, :] * tone[course % tone.shape[0], unit % tone.shape[1]][..., None]
+
+    # A joint is the thinnest thing we can draw — one pixel — but at ~3px per
+    # course that is still a third of the wall, where real brickwork is nearer a
+    # tenth. Blending rather than replacing keeps the coursing legible without
+    # turning the elevation into a bright grid.
+    joint = (((rows % unit_h) == 0) | ((shifted % unit_w) == 0))[..., None]
+    mortar = np.array(facade.mortar, float)[None, None, :]
+    return np.where(joint, rgb * 0.45 + mortar * 0.55, rgb)
+
+
+def _window(rgb, facade: Facade, rng, top: int, left: int, bay: int, px_x: float, px_y: float):
+    """A sash window with frame, sill and a hint of sky in the glass."""
+    width = round(1.15 * px_x)
+    height = round(1.35 * px_y)
+    x0 = left + (bay - width) // 2
+    y0 = top + round(0.60 * px_y)
+    x1, y1 = x0 + width, y0 + height
+    if y1 >= rgb.shape[0] or x1 >= rgb.shape[1]:
+        return
+
+    frame = np.array(facade.trim, dtype=float)
+    rgb[y0:y1, x0:x1] = frame
+
+    inset = max(2, round(0.06 * px_x))
+    gx0, gy0, gx1, gy1 = x0 + inset, y0 + inset, x1 - inset, y1 - inset
+    if gx1 <= gx0 or gy1 <= gy0:
+        return
+
+    # Glass is a mirror: pale sky at the top darkening down into the room.
+    fade = np.linspace(0.0, 1.0, gy1 - gy0)[:, None, None]
+    glass = np.array(_GLASS_SKY, float) * (1 - fade) + np.array(_GLASS, float) * fade
+    rgb[gy0:gy1, gx0:gx1] = glass * rng.uniform(0.9, 1.1)
+
+    # Glazing bars: one vertical mullion, one horizontal at the sash meeting rail.
+    mid_x = (gx0 + gx1) // 2
+    mid_y = (gy0 + gy1) // 2
+    rgb[gy0:gy1, mid_x : mid_x + max(1, inset // 2)] = frame
+    rgb[mid_y : mid_y + max(1, inset // 2), gx0:gx1] = frame
+
+    # Sill, projecting a little past the reveal on each side.
+    sill = max(2, round(0.09 * px_y))
+    overhang = max(1, round(0.08 * px_x))
+    sy1 = min(rgb.shape[0], y1 + sill)
+    rgb[y1:sy1, max(0, x0 - overhang) : min(rgb.shape[1], x1 + overhang)] = frame * 0.86
+
+
+def _door(rgb, facade: Facade, top: int, left: int, bay: int, px_x: float, px_y: float):
+    width = round(0.92 * px_x)
+    height = round(2.02 * px_y)
+    x0 = left + (bay - width) // 2
+    y1 = top + STOREY_PX
+    y0 = y1 - height
+    x1 = x0 + width
+    if y0 < 0 or y1 > rgb.shape[0] or x1 >= rgb.shape[1]:
+        return
+
+    frame = np.array(facade.trim, dtype=float)
+    rgb[y0:y1, x0:x1] = frame
+
+    inset = max(2, round(0.07 * px_x))
+    dx0, dy0, dx1 = x0 + inset, y0 + inset, x1 - inset
+    if dx1 <= dx0 or y1 - inset <= dy0:
+        return
+    # Painted door, darker than the surround so it reads as an opening.
+    rgb[dy0 : y1 - 1, dx0:dx1] = np.array((58, 66, 78), dtype=float)
+    # Fanlight over the top.
+    light = max(2, round(0.28 * px_y))
+    rgb[dy0 : dy0 + light, dx0:dx1] = np.array(_GLASS_SKY, dtype=float) * 0.9
+
+
+def _eaves(rgb, facade: Facade, px_y: float) -> None:
+    """Fascia and soffit. Cheap, and it stops the wall ending in mid-air."""
+    depth = max(2, round(0.30 * px_y))
+    rgb[:depth, :, :] = np.array(facade.trim, dtype=float) * 0.92
+    rgb[depth : depth + 1, :, :] = np.array(facade.trim, dtype=float) * 0.60
+
+
 def _encode(rgb: np.ndarray) -> bytes:
     image = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), mode="RGB")
     buffer = io.BytesIO()
@@ -325,4 +501,10 @@ def pk3_assets(seed: int = 1) -> dict[str, bytes]:
     }
     for index, ground in enumerate(GROUNDS):
         assets[f"flats/{ground.name}.png"] = ground_png(ground, seed + 101 * (index + 1))
+    for index, facade in enumerate(FACADES):
+        for storeys in range(1, MAX_STOREYS + 1):
+            name = facade_name(facade.key, storeys)
+            assets[f"textures/{name}.png"] = facade_png(
+                facade, storeys, seed + 1009 * (index + 1) + storeys
+            )
     return assets

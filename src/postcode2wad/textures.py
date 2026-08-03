@@ -13,7 +13,8 @@ and one grey, and neither is a British field.
 
 from __future__ import annotations
 
-from .art import FENCE, HEDGE
+from . import UNITS_PER_METRE
+from .art import FENCE, HEDGE, MAX_STOREYS, STOREY_M, STOREY_PX, facade_name
 
 SKY_FLAT = "F_SKY1"  # special: makes a ceiling render as sky
 
@@ -102,6 +103,60 @@ def building_wall(tags: dict[str, str]) -> str:
     if tags.get("amenity") == "place_of_worship" or tags.get("historic"):
         return STONE
     return BRICK
+
+
+#: Façade material by OSM building class. Anything not listed is domestic.
+FACADE_KEYS = {
+    "church": "S",
+    "cathedral": "S",
+    "chapel": "S",
+    "industrial": "G",
+    "warehouse": "G",
+    "commercial": "G",
+    "retail": "G",
+    "office": "G",
+    "garage": "G",
+    "garages": "G",
+    "shed": "G",
+    "hut": "G",
+    "greenhouse": "G",
+    "farm_auxiliary": "G",
+    "barn": "G",
+    "school": "R",
+    "hospital": "G",
+}
+
+#: Domestic walls rotate through red brick, Kent yellow stock and render. The
+#: choice is a stable hash of the OSM id, not a random draw: a street needs to
+#: vary, but the same house has to come out the same colour every time the tile
+#: is generated or the golden-file determinism test is worthless.
+DOMESTIC_FACADES = ("R", "Y", "R", "N", "Y")
+
+
+def building_storeys(height_m: float) -> int:
+    """How many storeys a measured height implies, clamped to what we generate."""
+    return max(1, min(MAX_STOREYS, round(height_m / STOREY_M)))
+
+
+def building_facade(tags: dict[str, str], osm_id: int, height_m: float) -> tuple[str, float]:
+    """The façade texture for a building, and the scaley that fits it to the wall.
+
+    The texture is drawn to cover the whole wall exactly once, top to bottom, so
+    the eaves land on the roofline and the ground floor on the ground. Doom maps
+    one texture pixel to one map unit and scales by division, so covering H units
+    with a T-pixel texture needs scaley = T / H.
+    """
+    kind = tags.get("building", "yes")
+    key = FACADE_KEYS.get(kind)
+    if key is None:
+        if tags.get("amenity") == "place_of_worship" or tags.get("historic"):
+            key = "S"
+        else:
+            key = DOMESTIC_FACADES[osm_id % len(DOMESTIC_FACADES)]
+
+    storeys = building_storeys(height_m)
+    wall_units = max(1.0, height_m * UNITS_PER_METRE)
+    return facade_name(key, storeys), (storeys * STOREY_PX) / wall_units
 
 
 #: Wall texture for a barrier. Hedge and fence are generated (art.py); masonry
