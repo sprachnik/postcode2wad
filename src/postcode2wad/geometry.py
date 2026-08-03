@@ -428,15 +428,14 @@ def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] 
     sign = 1.0 if c > 0 else -1.0
     a, b, c = a / norm * sign, b / norm * sign, c / norm * sign
 
-    # Cap the steepness. A triangle whose corners straddle a sharp feature in
-    # the DTM -- a retaining wall, a bank, LIDAR noise at a hedge line -- fits a
-    # near-vertical plane (the worst measured was gradient 64). The engine
-    # cannot walk anything like that, and worse, a plane that steep makes
-    # floorz under a straddling actor swing wildly. Refusing the plane makes
-    # the sector fall back to its flat ring-average height, so a genuine bank
-    # renders as a terraced step instead of an invisible slide.
-    if (a * a + b * b) ** 0.5 > abs(c):   # steeper than 45 degrees
-        return None
+    # No steepness cap. One was tried while hunting the movement bug, on the
+    # theory that near-vertical planes (the worst DTM triangle fits a gradient
+    # of 64) were unwalkable. The real cause turned out to be the normal's sign,
+    # and the cap made things worse: a rejected plane falls back to the flat
+    # ring-average height, and the steps that leaves between neighbours are
+    # *harder* barriers than the slope was. Measured on Birchington, unreachable
+    # ground went 0.41% -> 2.14% with the cap in. A steep plane is walked
+    # correctly, or slid down, which is what a bank should do.
     d = -(a * x1 + b * y1 + c * z1)
     return (a, b, c, d)
 
