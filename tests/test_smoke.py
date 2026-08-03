@@ -155,7 +155,24 @@ def test_no_spires_between_ground_sectors(tile):
 
 
 def test_no_interior_one_sided_lines(tile):
-    """One-sided lines away from the map edge are tears or full-height walls."""
+    """One-sided lines away from the map edge are tears or full-height walls.
+
+    GZDoom draws a one-sided line as solid from its sector's floor to its
+    ceiling, and outdoor ceilings here are 130m up. So an orphaned edge is not
+    a subtle defect: it is a grass-textured blade standing in the sky, which is
+    what a player reported after this test had been passing for weeks.
+
+    It passed because it allowed anything under 32 units as "an invisible
+    hairline". That was wrong twice over -- a hairline is invisible edge-on and
+    a metre-wide wall face-on, and the tolerance was hiding real ones. There is
+    no length at which an orphaned edge is acceptable, so there is no tolerance
+    here now.
+
+    It also only ever ran on this one tile, which had 11 of them (all short,
+    all forgiven) while a neighbouring tile in the same region had 134. Per-map
+    invariants need checking on more than the map they were written against;
+    `scripts/onesided.py` sweeps a whole region PK3.
+    """
     xs = [v[0] for v in tile.vertices]
     ys = [v[1] for v in tile.vertices]
     lo_x, hi_x, lo_y, hi_y = min(xs), max(xs), min(ys), max(ys)
@@ -173,9 +190,45 @@ def test_no_interior_one_sided_lines(tile):
         v1, v2 = tile.vertices[line["v1"]], tile.vertices[line["v2"]]
         if on_edge(v1) and on_edge(v2):
             continue
-        if math.dist(v1, v2) > 32:  # under a metre is an invisible hairline
-            interior.append(math.dist(v1, v2))
-    assert not interior, f"{len(interior)} interior one-sided lines, longest {max(interior):.0f}u"
+        interior.append(math.dist(v1, v2))
+    assert not interior, (
+        f"{len(interior)} interior one-sided lines, longest {max(interior) / 32:.2f} m "
+        "— each is a wall from the ground to the sky"
+    )
+
+
+def test_every_sector_is_closed(tile):
+    """A sector whose boundary does not close becomes a collision trap.
+
+    GZDoom's node builder does not reject an unclosed sector; it builds
+    something, and the something has phantom solid space in it. The symptom is
+    the player standing on open ground, rendered perfectly, moving 1 unit per
+    second in every direction.
+
+    A closed boundary is a set of loops, so every vertex on it must be entered
+    as many times as it is left -- which means each vertex appears an even
+    number of times among the sector's own lines. That is cheap to check and it
+    is exactly the property the node builder needs.
+
+    This exists because the rule that used to guarantee it -- dropping
+    sub-unit-area faces -- was doing so at the cost of 219 sky-high walls
+    across a region, and was removed. Measured before removing it: no edge in
+    the arrangement has more than two users either way, so the rule was not the
+    thing keeping sectors closed. This test is the standing proof of that.
+    """
+    per_sector = collections.defaultdict(collections.Counter)
+    for line in tile.linedefs:
+        for key in ("sidefront", "sideback"):
+            if key not in line:
+                continue
+            sector = tile.sidedefs[line[key]]["sector"]
+            per_sector[sector][line["v1"]] += 1
+            per_sector[sector][line["v2"]] += 1
+
+    unclosed = [s for s, verts in per_sector.items() if any(n % 2 for n in verts.values())]
+    assert not unclosed, (
+        f"{len(unclosed)} of {len(tile.sectors)} sectors have an unclosed boundary"
+    )
 
 
 def test_most_of_the_tile_is_walkable(tile):

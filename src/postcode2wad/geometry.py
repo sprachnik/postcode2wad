@@ -373,19 +373,28 @@ def _drop_degenerate_faces(
     8 units/tic across open ground at the spawn, moved 1 unit per second.
 
     Dropping these is safe precisely because they have no rounded interior:
-    with the degenerate face gone, its healthy neighbours' edges pair with each
-    other and the topology is manifold again.
+    two of their corners land on the same point, so their edges duplicate the
+    segment their healthy neighbours already share. With the face gone, those
+    neighbours pair with each other and the topology is manifold again.
+
+    That argument is the whole justification, and it only covers faces whose
+    corners *collide*. A second rule used to drop faces with three distinct
+    corners but under a square unit of area, and those have three real edges of
+    their own -- dropping one orphans all three, and an orphaned edge becomes a
+    one-sided line, which GZDoom draws as a solid wall from the ground to the
+    sky ceiling. A needle 10m long and a millimetre wide therefore left a
+    10m-wide, 130m-tall grass-textured blade standing in the open. 219 of them
+    across the nine Birchington tiles, and the reason this went unnoticed for
+    so long is that they render as scenery rather than as an error.
+
+    The rule bought nothing anyway: measured on this tile, no edge has more
+    than two users with or without it. It dropped 5 extra faces and created 11
+    extra holes to do it.
     """
     kept: list[tuple[Polygon, SectorSpec]] = []
     for face, spec in owned:
         ring = [(round(x), round(y)) for x, y in list(face.exterior.coords)[:-1]]
-        distinct = list(dict.fromkeys(ring))
-        if len(distinct) < 3:
-            continue
-        doubled_area = 0
-        for (x1, y1), (x2, y2) in zip(distinct, distinct[1:] + distinct[:1]):
-            doubled_area += x1 * y2 - x2 * y1
-        if abs(doubled_area) < 2:  # under one square map unit: nothing survives
+        if len(set(ring)) < 3:
             continue
         kept.append((face, spec))
     return kept
