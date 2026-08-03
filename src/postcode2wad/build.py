@@ -78,7 +78,11 @@ WATER_LIGHT = 216
 #: 24-unit step); the sloped one only controls how finely the ground is cut into
 #: sectors, since the height itself comes from a per-sector plane.
 DEFAULT_FLAT_STEP_M = 0.5
-DEFAULT_SLOPED_STEP_M = 2.0
+#: 4m rather than 2m: the height comes from a per-triangle plane, so the bands
+#: only decide how finely the ground is tessellated. Coarsening to 4m drops the
+#: tile from 7,349 sectors to 5,613 with no visible change; 8m saves a further
+#: 1,200 but starts fitting a single plane across a whole field.
+DEFAULT_SLOPED_STEP_M = 4.0
 
 PLAYER_START = 1
 

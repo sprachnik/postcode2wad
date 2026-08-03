@@ -181,6 +181,8 @@ def build_geometry(
     if not owned:
         raise ValueError("no face fell inside any SectorSpec")
 
+    owned = _triangulate_sloped(owned)
+
     # Collect directed ring segments. Face interior is always on the LEFT of p->q.
     edges: dict[tuple[Coord, Coord], list[tuple[int, Coord, Coord]]] = {}
     for face_idx, (face, _spec) in enumerate(owned):
@@ -307,40 +309,83 @@ def build_geometry(
     return geo
 
 
-def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] | None:
-    """Least-squares fit of the ground under a face, as a UDMF floor plane.
+def _triangulate_sloped(
+    owned: list[tuple[Polygon, SectorSpec]],
+) -> list[tuple[Polygon, SectorSpec]]:
+    """Cut every sloped face into triangles.
 
-    GZDoom takes `floorplane_a..d` as a*x + b*y + c*z + d = 0 with (a,b,c) a
-    unit normal. Writing the surface as z = mx*x + my*y + h0 gives the normal
-    directly as (mx, my, -1), normalised.
+    Not for GZDoom's sake — a sector plane works on any polygon — but for
+    *continuity*. A plane fitted to a face with four or more corners cannot pass
+    through the ground height at all of them, so two neighbours each fit their
+    own compromise and disagree along the edge they share. Measured on a real
+    tile that put 1.8% of shared edges over Doom's 24-unit climb limit: invisible
+    walls, a couple of metres tall, scattered across open ground. A triangle's
+    three corners define a plane exactly, and neighbours share two of them, so
+    triangles are the largest face that can be guaranteed to line up.
 
-    This is per *sector*, which is the whole reason for preferring it to
-    per-vertex `zfloor`: vertex heights are shared, so GZDoom applies them to
-    any three-sided sector touching that vertex — which silently dragged 110
-    building roofs down to terrain height, up to 14m out, wherever a footprint
-    happened to triangulate into a triangle. A sector plane cannot leak onto a
-    neighbour, and needs no triangulation, so the mesh cost disappears too.
+    Constrained Delaunay because it neither moves nor adds boundary vertices,
+    so the mesh still meets the flat faces around it exactly.
     """
-    import numpy as np
+    import shapely
 
-    ring = list(face.exterior.coords)[:-1]
-    if len(ring) < 3:
-        return None
-    # The centroid as well, so a long thin face is not fitted from its ends only.
-    probe = face.representative_point()
-    points = [*ring, (probe.x, probe.y)]
+    out: list[tuple[Polygon, SectorSpec]] = []
+    for face, spec in owned:
+        if not spec.sloped or len(face.exterior.coords) <= 4:
+            out.append((face, spec))
+            continue
+        try:
+            pieces = shapely.constrained_delaunay_triangles(face)
+        except shapely.errors.GEOSException:
+            out.append((face, spec))
+            continue
+        triangles = [
+            g for g in getattr(pieces, "geoms", []) if isinstance(g, Polygon) and g.area > 0
+        ]
+        out.extend((t, spec) for t in triangles) if triangles else out.append((face, spec))
+    return out
 
-    a_matrix = np.array([[x, y, 1.0] for x, y in points])
-    heights = np.array([height_at(x, y) for x, y in points])
-    try:
-        (mx, my, h0), *_ = np.linalg.lstsq(a_matrix, heights, rcond=None)
-    except np.linalg.LinAlgError:
-        return None
-    if not all(np.isfinite(v) for v in (mx, my, h0)):
+
+def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] | None:
+    """The ground plane under a face, as UDMF `floorplane_a..d`.
+
+    GZDoom reads these as a*x + b*y + c*z + d = 0 with (a,b,c) a unit normal.
+    Writing the surface as z = mx*x + my*y + h0 gives the normal as
+    (mx, my, -1), normalised.
+
+    Per *sector*, not per vertex. Vertex `zfloor` is shared, and GZDoom applies
+    it to any three-sided sector touching that vertex — which silently dragged
+    110 building roofs down to terrain height, up to 14m out, wherever a
+    footprint happened to be a triangle. A sector plane cannot leak.
+
+    Heights are sampled at the **rounded** corner coordinates, which is what
+    makes adjacent triangles agree: the vertex table rounds to integers, so two
+    faces sharing an edge sample the identical two points and their planes meet
+    along it exactly.
+    """
+    ring = [(round(x), round(y)) for x, y in list(face.exterior.coords)[:-1]]
+    if len(ring) != 3:
         return None
 
-    norm = float(np.sqrt(mx * mx + my * my + 1.0))
-    return (float(mx) / norm, float(my) / norm, -1.0 / norm, float(h0) / norm)
+    (x1, y1), (x2, y2), (x3, y3) = ring
+    z1, z2, z3 = (height_at(x, y) for x, y in ring)
+
+    # Cross product of two edges gives the plane normal directly.
+    ux, uy, uz = x2 - x1, y2 - y1, z2 - z1
+    vx, vy, vz = x3 - x1, y3 - y1, z3 - z1
+    a = uy * vz - uz * vy
+    b = uz * vx - ux * vz
+    c = ux * vy - uy * vx
+    if c == 0:
+        return None  # collinear corners: no plane through them
+
+    norm = (a * a + b * b + c * c) ** 0.5
+    if norm == 0:
+        return None
+    # GZDoom wants the normal pointing up, i.e. c negative in its convention.
+    sign = -1.0 if c > 0 else 1.0
+    a, b, c = a / norm * sign, b / norm * sign, c / norm * sign
+    d = -(a * x1 + b * y1 + c * z1)
+    return (a, b, c, d)
 
 
 def _width(polygon: Polygon) -> float:
