@@ -84,6 +84,11 @@ DEFAULT_FLAT_STEP_M = 0.5
 #: 1,200 but starts fitting a single plane across a whole field.
 DEFAULT_SLOPED_STEP_M = 4.0
 
+#: Radius of the low-pass applied to the DTM before ground planes are fitted.
+#: Not a cosmetic nicety: raw 1m LIDAR noise, sampled per triangle, makes the
+#: surface visibly faceted. Kept well under the scale of real landform.
+GROUND_SMOOTH_M = 4.0
+
 PLAYER_START = 1
 
 PAVED_FOOTWAYS = {"footway", "path", "pedestrian", "steps", "cycleway", "bridleway"}
@@ -546,7 +551,11 @@ def build_tile(
     geometry = build_geometry(
         specs,
         things=things,
-        height_at=height_sampler(dtm, tile) if (with_slopes and dtm is not None) else None,
+        height_at=(
+            height_sampler(dtm, tile, GROUND_SMOOTH_M)
+            if (with_slopes and dtm is not None)
+            else None
+        ),
     )
 
     stats.sectors = len(geometry.sectors)

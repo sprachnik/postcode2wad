@@ -53,7 +53,47 @@ MAX_STEP_UNITS = 24
 MAX_CONTOUR_STEP_M = MAX_STEP_UNITS / UNITS_PER_METRE  # 0.75
 
 
-def height_sampler(dtm: Raster, tile: Tile):
+def _blur_axis(values: np.ndarray, radius: int, axis: int) -> np.ndarray:
+    """Box blur along one axis, by cumulative sums. Separable, so two passes."""
+    width = 2 * radius + 1
+    pad = [(radius, radius) if a == axis else (0, 0) for a in range(values.ndim)]
+    padded = np.pad(values, pad, mode="edge")
+    sums = np.cumsum(padded, axis=axis)
+    lead = np.zeros([1 if a == axis else n for a, n in enumerate(sums.shape)])
+    sums = np.concatenate([lead, sums], axis=axis)
+    length = values.shape[axis]
+    high = np.take(sums, range(width, width + length), axis=axis)
+    low = np.take(sums, range(length), axis=axis)
+    return (high - low) / width
+
+
+def smooth_heights(dtm: Raster, radius_m: float) -> np.ndarray:
+    """A low-pass copy of the DTM, for fitting ground planes against.
+
+    The raw 1m LIDAR carries centimetre-scale noise -- ground clutter, vegetation
+    the filter did not quite remove, the return pattern itself. Fitting a plane
+    per triangle against it reproduces every wiggle, and since triangles are
+    small (their size is set by road and parcel outlines, not by terrain) the
+    result is a faceted surface: measured 15 degrees of dihedral at the 90th
+    percentile between neighbours, up to 69 degrees along a road, which reads
+    as choppy and blocky.
+
+    Smoothing before fitting keeps the landform -- this tile spans 8m of relief
+    over 400m, far coarser than the filter -- while removing the chop. Two box
+    passes approximate a Gaussian closely enough and cost one pass over a
+    400x400 array.
+    """
+    values = dtm.values.astype(float)
+    finite = np.isfinite(values)
+    if not finite.all():
+        values = np.where(finite, values, np.nanmedian(values))
+    radius = max(1, round(radius_m / dtm.pixel_m))
+    for _ in range(2):
+        values = _blur_axis(_blur_axis(values, radius, 0), radius, 1)
+    return values
+
+
+def height_sampler(dtm: Raster, tile: Tile, smooth_m: float = 0.0):
     """A fast map-units -> floor-units lookup, for per-vertex terrain heights.
 
     Nearest pixel, not bilinear, and deliberately so: this is called once per
@@ -61,7 +101,7 @@ def height_sampler(dtm: Raster, tile: Tile):
     resolves. `ground_height_m` rasterises a polygon mask per call and is orders
     of magnitude too slow for this.
     """
-    values = dtm.values
+    values = smooth_heights(dtm, smooth_m) if smooth_m > 0 else dtm.values
     rows, cols = values.shape
     origin_e, origin_n = tile.origin
     fallback = float(np.nanmedian(values))
