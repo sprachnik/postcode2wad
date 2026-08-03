@@ -71,11 +71,20 @@ if ($CheckOnly) {
         exit 1
     }
 
-    $bad = $log | Select-String -Pattern "Script error", "Execution could not continue",
-        "Unknown texture", "has no lines", "is not a valid", "Bad sidedef", "Warning"
-    if ($bad) {
-        Write-Output "=== problems ==="
-        $bad | ForEach-Object { Write-Output $_.Line }
+    # Show the FIRST problems, with the line after each (GZDoom puts the message
+    # on the line following "Script error, ... line N:"). Showing the tail
+    # instead is actively misleading: ZScript errors cascade, so the last ones
+    # are downstream symptoms and the root cause has already scrolled away.
+    $lines = @($log)
+    $hits = for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "Script error|Execution could not continue|Unknown texture|has no lines|Bad sidedef|Warning") {
+            $lines[$i]
+            if ($i + 1 -lt $lines.Count) { "    " + $lines[$i + 1] }
+        }
+    }
+    if ($hits) {
+        Write-Output "=== first problems (root cause is at the top) ==="
+        $hits | Select-Object -First 20
         exit 1
     }
     Write-Output "loaded clean: $Pk3 ($($log.Count) log lines)"

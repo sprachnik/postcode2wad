@@ -157,6 +157,11 @@ def _player_start(
     typing their own postcode expects anyway.
     """
     x, y = tile.to_map(place.easting, place.northing)
+    if not (0 <= x <= size_units and 0 <= y <= size_units):
+        # A region pack builds tiles the postcode is nowhere near. Clamping
+        # would jam every one of those starts into the corner nearest the
+        # postcode; the middle of the tile is the honest default.
+        x = y = size_units / 2.0
     x = min(max(x, 96), size_units - 96)
     y = min(max(y, 96), size_units - 96)
 
@@ -212,8 +217,13 @@ def build_tile(
     with_landuse: bool = True,
     with_barriers: bool = True,
     with_trees: bool = True,
+    tile: Tile | None = None,
+    features: overpass.TileFeatures | None = None,
 ) -> BuiltMap:
-    tile = Tile.containing(place.easting, place.northing, size_m)
+    # A region pack builds tiles the postcode does not sit in, so the caller can
+    # name the tile directly. Without an override the postcode picks it.
+    if tile is None:
+        tile = Tile.containing(place.easting, place.northing, size_m)
     stats = BuildStats()
     clip = tile_clip(tile)
 
@@ -261,7 +271,11 @@ def build_tile(
             )
         )
 
-    features = overpass.fetch_tile(tile.bbox_wgs84, cache_dir, refresh)
+    # A region pack fetches one query covering every tile and hands the result
+    # to each in turn: features are clipped to the tile downstream anyway, so
+    # nine tiles need one Overpass round trip rather than nine.
+    if features is None:
+        features = overpass.fetch_tile(tile.bbox_wgs84, cache_dir, refresh)
 
     def terrain_at(polygon: Polygon) -> float:
         if dtm is None:

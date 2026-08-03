@@ -50,14 +50,14 @@ GameInfo
 
 """
 
-MAPINFO_TEMPLATE = """\
-{handlers}map {map_name} "{title}"
+MAP_TEMPLATE = """\
+map {map_name} "{title}"
 {{
     sky1 = "{sky}"
     music = "{music}"
     cluster = 1
-    next = "{map_name}"
-    secretnext = "{map_name}"
+    next = "{next_map}"
+    secretnext = "{next_map}"
 
     lightmode = {light_mode}
     fade = "{haze}"
@@ -77,19 +77,44 @@ def build_mapinfo(
     fog_density: int = FOG_DENSITY,
     event_handler: str | None = None,
 ) -> str:
-    return MAPINFO_TEMPLATE.format(
-        handlers=(
-            EVENT_HANDLER_TEMPLATE.format(handler=event_handler) if event_handler else ""
-        ),
-        map_name=map_name,
-        title=title,
+    return build_region_mapinfo(
+        [(map_name, title)],
         sky=sky,
         music=music,
-        light_mode=LIGHT_MODE,
-        haze=art.haze_hex(),
         fog_density=fog_density,
-        sky_fog=SKY_FOG,
+        event_handler=event_handler,
     )
+
+
+def build_region_mapinfo(
+    maps: list[tuple[str, str]],
+    sky: str = art.SKY,
+    music: str = DEFAULT_MUSIC,
+    fog_density: int = FOG_DENSITY,
+    event_handler: str | None = None,
+) -> str:
+    """One map block per tile, all in a single cluster.
+
+    Every map points `next` at itself. Navigation between tiles is done by the
+    event handler calling ChangeLevel directly, so the sequence here is never
+    followed — but a dangling `next` warns on load, so they all get a valid one.
+    """
+    header = EVENT_HANDLER_TEMPLATE.format(handler=event_handler) if event_handler else ""
+    blocks = [
+        MAP_TEMPLATE.format(
+            map_name=name,
+            title=title,
+            next_map=name,
+            sky=sky,
+            music=music,
+            light_mode=LIGHT_MODE,
+            haze=art.haze_hex(),
+            fog_density=fog_density,
+            sky_fog=SKY_FOG,
+        )
+        for name, title in maps
+    ]
+    return header + "\n".join(blocks)
 
 
 def write_pk3(
@@ -118,6 +143,47 @@ def write_pk3(
             "MAPINFO",
             build_mapinfo(
                 map_name, title, sky, fog_density=fog_density, event_handler=event_handler
+            ),
+        )
+        for name, data in files.items():
+            pk3.writestr(name, data)
+
+    return path
+
+
+def write_region_pk3(
+    path: str | Path,
+    maps: list[tuple[str, str, str]],
+    sky: str = art.SKY,
+    extra_files: dict[str, bytes] | None = None,
+    art_seed: int | None = 1,
+    fog_density: int = FOG_DENSITY,
+    event_handler: str | None = None,
+) -> Path:
+    """Write a multi-tile pack. `maps` is (map_name, title, textmap) per tile.
+
+    The generated art is shared across every map in the pack rather than being
+    written per tile, which is most of why a 3x3 region is nowhere near nine
+    times the size of a single tile.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    files: dict[str, bytes] = {}
+    if art_seed is not None:
+        files.update(art.pk3_assets(art_seed))
+    files.update(extra_files or {})
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as pk3:
+        for map_name, _title, textmap in maps:
+            pk3.writestr(f"maps/{map_name}.wad", build_map_wad(textmap, map_name))
+        pk3.writestr(
+            "MAPINFO",
+            build_region_mapinfo(
+                [(name, title) for name, title, _ in maps],
+                sky=sky,
+                fog_density=fog_density,
+                event_handler=event_handler,
             ),
         )
         for name, data in files.items():

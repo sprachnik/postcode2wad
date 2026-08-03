@@ -25,7 +25,12 @@ from . import cache
 ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.osm.jp/api/interpreter",
+    # overpass.osm.jp was here and has been dropped: it serves a certificate
+    # that is not valid for its own hostname, so every request to it fails
+    # verification. Because it was last in the list its SSL error was the one
+    # reported when the other two rate-limited, which made a throttling problem
+    # look like a certificate problem.
+    "https://overpass.private.coffee/api/interpreter",
 ]
 USER_AGENT = "postcode2wad/0.1 (+https://github.com/sprachnik/postcode2wad)"
 TIMEOUT = 180
@@ -146,7 +151,14 @@ def fetch_tile(
 
 
 def _post(query: str) -> dict:
-    """Try each mirror, then back off and go round again."""
+    """Try each mirror, then back off and go round again.
+
+    Every endpoint's failure is kept, not just the last one. With only the last
+    one you get told about whichever mirror happens to be at the end of the
+    list, which is actively misleading when the real problem is that the first
+    two rate-limited you.
+    """
+    failures: dict[str, str] = {}
     last_error: Exception | None = None
 
     for attempt in range(RETRIES):
@@ -164,10 +176,17 @@ def _post(query: str) -> dict:
                 # "come back later", not "your query is wrong".
                 if response.status_code in (429, 502, 503, 504):
                     last_error = RuntimeError(f"{endpoint} returned {response.status_code}")
+                    failures[endpoint] = f"HTTP {response.status_code}"
                     continue
                 response.raise_for_status()
                 return response.json()
             except requests.RequestException as exc:
                 last_error = exc
+                failures[endpoint] = type(exc).__name__
 
-    raise RuntimeError(f"all Overpass endpoints failed after {RETRIES} rounds: {last_error}")
+    detail = "; ".join(f"{host.split('/')[2]}: {why}" for host, why in failures.items())
+    raise RuntimeError(
+        f"all Overpass endpoints failed after {RETRIES} rounds ({detail}). "
+        "429 across the board means we are being rate limited — Overpass is "
+        "donated infrastructure, so back off rather than retrying harder."
+    ) from last_error
