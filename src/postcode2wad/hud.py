@@ -20,6 +20,7 @@ not per region: one plane stretched across a county would drift badly.
 from __future__ import annotations
 
 from . import UNITS_PER_METRE
+from .attribution import SHORT as ATTRIBUTION_SHORT
 from .tiles import Tile, osgb_to_lonlat
 
 #: Lump and graphic names. Minimaps are numbered to match their map: MAP03's
@@ -99,6 +100,7 @@ def build_zscript(tiles: list[Tile], map_names: list[str]) -> str:
         count=len(tiles),
         tile_units=float(tiles[0].size_units),
         edge=float(EDGE_UNITS),
+        credit=ATTRIBUTION_SHORT,
         prefix=prefix,
         prefix_len=len(prefix),
         digits=digits,
@@ -404,7 +406,7 @@ class PostcodeHUD : StaticEventHandler
         int blockTop = py + panel + 3;
         int labelH = 0;
         if (label.Length() > 0) {{ labelH = fh + 2; }}
-        int blockH = int(crad * 2 + 10 + fh + 4 + labelH);
+        int blockH = int(crad * 2 + 10 + fh + 4 + labelH + fh + 2);
         Screen.Dim(0x0C1014, 0.55, px, blockTop, panel, blockH);
 
         double ccy = blockTop + 5 + crad;
@@ -420,6 +422,14 @@ class PostcodeHUD : StaticEventHandler
                 int(cx) - smallfont.StringWidth(label) / 2,
                 ty + fh + 2, label);
         }}
+
+        // Data credit. The OSMF Attribution Guidelines explicitly accept an
+        // in-game credit for games, and ATTRIBUTION.txt in the PK3 carries the
+        // detail this is too small to hold.
+        String credit = "{credit}";
+        Screen.DrawText(smallfont, Font.CR_DARKGRAY,
+            int(cx) - smallfont.StringWidth(credit) / 2,
+            ty + (fh + 2) * 2, credit);
     }}
 }}
 '''

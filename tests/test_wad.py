@@ -40,11 +40,37 @@ def test_map_wad_lump_order():
 def test_pk3_layout(tmp_path):
     out = write_pk3(tmp_path / "t.pk3", 'namespace = "zdoom";\n', title="Test Level", art_seed=None)
     with zipfile.ZipFile(out) as z:
-        assert set(z.namelist()) == {"maps/MAP01.wad", "MAPINFO"}
+        # ATTRIBUTION.txt is not optional: the licences behind the geometry
+        # require a credit, so it ships even with the generated art turned off.
+        assert set(z.namelist()) == {"maps/MAP01.wad", "MAPINFO", "ATTRIBUTION.txt"}
         mapinfo = z.read("MAPINFO").decode()
         assert 'map MAP01 "Test Level"' in mapinfo
         _magic, entries = read_dir(z.read("maps/MAP01.wad"))
         assert [e[0] for e in entries] == ["MAP01", "TEXTMAP", "ENDMAP"]
+
+
+def test_every_pk3_carries_its_licence_attribution(tmp_path):
+    """ODbL s4.3 and OGL v3 both require a credit; nothing else enforces it.
+
+    Every PK3 generated before this existed shipped 42 files and not one word
+    of attribution, which is a licence breach that no test or tool would catch.
+    """
+    out = write_pk3(
+        tmp_path / "t.pk3", 'namespace = "zdoom";\n', title="Test", tile_id="bng400-1-2"
+    )
+    with zipfile.ZipFile(out) as z:
+        text = z.read("ATTRIBUTION.txt").decode()
+
+    for required in (
+        "OpenStreetMap contributors",
+        "openstreetmap.org/copyright",
+        "opendatacommons.org/licenses/odbl",
+        "Environment Agency",
+        "Open Government Licence",
+        "Crown copyright",
+        "bng400-1-2",           # the tile ID, so the extract is reproducible
+    ):
+        assert required in text, f"attribution is missing {required!r}"
 
 
 def test_generated_art_ships_and_matches_the_fog_colour(tmp_path):

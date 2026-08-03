@@ -172,6 +172,7 @@ def _run_region(args, place, cache_dir: Path, tile_options: dict) -> int:
         fog_density=FOG_DENSITY if args.fog is None else args.fog,
         extra_files=extra,
         event_handler=handler,
+        tile_id=region.tiles[0].tile.id,
     )
     print(f"wrote {out}")
     return 0
@@ -276,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         fog_density=FOG_DENSITY if args.fog is None else args.fog,
         extra_files=extra,
         event_handler=handler,
+        tile_id=built.tile.id,
     )
     print(f"wrote {out}")
 

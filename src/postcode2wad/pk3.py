@@ -13,7 +13,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from . import art
+from . import __version__, art, attribution
 from .wad import build_map_wad
 
 #: Distance haze. This is the single strongest "you are outdoors" cue available:
@@ -127,6 +127,7 @@ def write_pk3(
     art_seed: int | None = 1,
     fog_density: int = FOG_DENSITY,
     event_handler: str | None = None,
+    tile_id: str | None = None,
 ) -> Path:
     """Write the PK3. `art_seed=None` skips generated art (and its Pillow cost)."""
     path = Path(path)
@@ -135,6 +136,7 @@ def write_pk3(
     files: dict[str, bytes] = {}
     if art_seed is not None:
         files.update(art.pk3_assets(art_seed))
+    files[attribution.FILENAME] = attribution.text(title, __version__, tile_id).encode()
     files.update(extra_files or {})
 
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as pk3:
@@ -159,6 +161,7 @@ def write_region_pk3(
     art_seed: int | None = 1,
     fog_density: int = FOG_DENSITY,
     event_handler: str | None = None,
+    tile_id: str | None = None,
 ) -> Path:
     """Write a multi-tile pack. `maps` is (map_name, title, textmap) per tile.
 
@@ -172,6 +175,8 @@ def write_region_pk3(
     files: dict[str, bytes] = {}
     if art_seed is not None:
         files.update(art.pk3_assets(art_seed))
+    title = maps[0][1] if maps else "Region"
+    files[attribution.FILENAME] = attribution.text(title, __version__, tile_id).encode()
     files.update(extra_files or {})
 
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as pk3:

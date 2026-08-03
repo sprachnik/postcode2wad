@@ -118,8 +118,13 @@ come back empty.
   *© Environment Agency copyright and/or database right. All rights reserved.*
 - **postcodes.io** (ONS/OS/Royal Mail) — OGL v3.
   *Contains OS data © Crown copyright and database right.*
-- **OpenStreetMap** — ODbL. *© OpenStreetMap contributors.* Note ODbL is share-alike
-  and that obligation propagates to distributed derived geometry.
+- **OpenStreetMap** — ODbL. *© OpenStreetMap contributors.* A generated level is a
+  **Produced Work** under ODbL §4.5(b) — made to be played, not queried — so it needs
+  attribution but **not** share-alike. Every PK3 ships an `ATTRIBUTION.txt` and shows a
+  credit on the HUD, which the OSMF Attribution Guidelines accept for games. Because the
+  pipeline also uses LIDAR, the Trivial Transformations exemption does not apply and
+  §4.6 is engaged: the OSM extract behind any tile is reproducible from this source plus
+  the tile ID, since generation is a pure function of it.
 - **Freedoom** — modified BSD, credits retained.
 - **GZDoom** — GPLv3 (any engine fork is published as source alongside binaries).
 
