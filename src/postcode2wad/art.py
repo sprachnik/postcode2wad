@@ -20,6 +20,7 @@ meaningful.
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
@@ -51,16 +52,28 @@ def _smoothstep(t: np.ndarray) -> np.ndarray:
     return t * t * (3.0 - 2.0 * t)
 
 
-def _value_noise(rng: np.random.Generator, height: int, width: int, cx: int, cy: int) -> np.ndarray:
+def _value_noise(
+    rng: np.random.Generator,
+    height: int,
+    width: int,
+    cx: int,
+    cy: int,
+    wrap_y: bool = False,
+) -> np.ndarray:
     """Bilinear value noise on a lattice that wraps horizontally.
 
     The wrap matters: a Doom sky texture is tiled around the full 360 degrees of
     yaw, so any seam in x is a permanent vertical scar in the sky that the player
     can turn around and find. Duplicating the first lattice column onto the end
     makes the interpolation continuous across the join.
+
+    Flats need the same guarantee in both axes — a field is the same texture
+    tiled hundreds of times across a tile, and a seam becomes a visible grid.
     """
-    lattice = rng.random((cy + 1, cx))
+    lattice = rng.random((cy if wrap_y else cy + 1, cx))
     lattice = np.concatenate([lattice, lattice[:, :1]], axis=1)
+    if wrap_y:
+        lattice = np.concatenate([lattice, lattice[:1, :]], axis=0)
 
     xs = np.linspace(0.0, cx, width, endpoint=False)
     ys = np.linspace(0.0, cy, height, endpoint=False)
@@ -86,12 +99,15 @@ def _fbm(
     cx: int,
     cy: int,
     octaves: int = 5,
+    wrap_y: bool = False,
 ) -> np.ndarray:
     """Fractional Brownian motion — octaves of value noise at halving amplitude."""
     total = np.zeros((height, width))
     amplitude, norm = 1.0, 0.0
     for octave in range(octaves):
-        total += amplitude * _value_noise(rng, height, width, cx << octave, cy << octave)
+        total += amplitude * _value_noise(
+            rng, height, width, cx << octave, cy << octave, wrap_y
+        )
         norm += amplitude
         amplitude *= 0.5
     return total / norm
@@ -140,6 +156,95 @@ def sky_png(seed: int = 1, width: int = SKY_WIDTH, height: int = SKY_HEIGHT) -> 
     return _encode(rgb)
 
 
+#: A flat is 64 map units square — exactly 2m of ground at 32 units/m. Rendering
+#: it at 128px therefore gives 64 pixels per metre, which is more than enough for
+#: grass and about right for the mortar course in a paving slab.
+FLAT_SIZE = 128
+FLAT_UNITS_M = 2.0
+
+
+@dataclass(frozen=True)
+class Ground:
+    """Recipe for one ground flat.
+
+    Real ground varies at two scales at once — broad patches of colour metres
+    across, and fine grain at the centimetre level. Using only the fine scale
+    gives the flat, even mush that Freedoom's GRASS1 has and that made the first
+    screenshots read as a billiard table.
+    """
+
+    name: str
+    rgb: tuple[int, int, int]
+    #: Coarse mottling: how far patches drift from the base colour, 0-1.
+    blotch: float = 0.10
+    #: Fine grain amplitude, 0-1.
+    grain: float = 0.06
+    #: Lattice cells across the tile for the coarse layer. Higher = busier.
+    cells: int = 4
+    #: Optional directional banding: (period_px, strength). Furrows in a ploughed
+    #: field, mower stripes on a pitch, the joint lines in paving.
+    stripes: tuple[int, float] | None = None
+    #: Draw a slab grid at this pixel pitch — paving and concrete only.
+    slabs: int | None = None
+
+
+#: Ground cover we can generate. Names stay within 8 characters: long lump names
+#: are legal in a PK3 and in UDMF, but staying short keeps them greppable in a
+#: TEXTMAP and safe if any of this is ever emitted as a plain WAD.
+GROUNDS = (
+    Ground("DMGRASS", (86, 112, 58), blotch=0.13, grain=0.07, cells=4),
+    # Mown and watered: darker, richer and far more even than a rough field.
+    # This is what separates a village from the farmland around it — 20 of the
+    # 37 parcels on the Birchington tile are landuse=residential.
+    Ground("DMGARDEN", (62, 96, 48), blotch=0.07, grain=0.05, cells=5),
+    Ground("DMMEADOW", (120, 134, 66), blotch=0.16, grain=0.09, cells=3),
+    Ground("DMPITCH", (74, 116, 52), blotch=0.06, grain=0.04, stripes=(32, 0.07)),
+    Ground("DMWOOD", (48, 66, 38), blotch=0.22, grain=0.10, cells=6),
+    Ground("DMSCRUB", (92, 100, 62), blotch=0.20, grain=0.11, cells=5),
+    Ground("DMFARM", (108, 84, 58), blotch=0.14, grain=0.08, stripes=(16, 0.10)),
+    Ground("DMSAND", (198, 180, 138), blotch=0.09, grain=0.06, cells=3),
+    Ground("DMTARMAC", (62, 62, 66), blotch=0.07, grain=0.06, cells=3),
+    Ground("DMPAVE", (146, 143, 136), blotch=0.05, grain=0.04, slabs=64),
+    Ground("DMCONC", (158, 156, 150), blotch=0.06, grain=0.04, cells=3),
+    Ground("DMGRAVEL", (132, 124, 110), blotch=0.10, grain=0.16, cells=8),
+    Ground("DMWATER", (58, 92, 112), blotch=0.10, grain=0.03, cells=3),
+)
+
+GROUND_BY_NAME = {ground.name: ground for ground in GROUNDS}
+
+
+def ground_png(ground: Ground, seed: int = 1, size: int = FLAT_SIZE) -> bytes:
+    """One tileable ground flat."""
+    rng = np.random.default_rng(seed)
+
+    coarse = _fbm(rng, size, size, ground.cells, ground.cells, octaves=3, wrap_y=True)
+    fine = _fbm(rng, size, size, size // 8, size // 8, octaves=2, wrap_y=True)
+
+    shade = 1.0 + (coarse - 0.5) * 2.0 * ground.blotch + (fine - 0.5) * 2.0 * ground.grain
+
+    if ground.stripes:
+        period, strength = ground.stripes
+        rows = np.arange(size)[:, None]
+        # Full cycles across the tile only, or the stripe steps at the seam.
+        cycles = max(1, round(size / period))
+        shade = shade * (1.0 + strength * np.sin(2.0 * np.pi * cycles * rows / size))
+
+    rgb = np.array(ground.rgb, dtype=float)[None, None, :] * shade[..., None]
+
+    if ground.slabs:
+        # Joints darken; the slab faces themselves vary slightly in tone so the
+        # grid does not read as a single stamped sheet.
+        xs = np.arange(size)[None, :]
+        ys = np.arange(size)[:, None]
+        joint = ((xs % ground.slabs) < 2) | ((ys % ground.slabs) < 2)
+        tone = rng.uniform(0.94, 1.06, (size // ground.slabs + 1, size // ground.slabs + 1))
+        tone = np.repeat(np.repeat(tone, ground.slabs, 0), ground.slabs, 1)[:size, :size]
+        rgb = rgb * tone[..., None]
+        rgb = np.where(joint[..., None], rgb * 0.78, rgb)
+
+    return _encode(rgb)
+
+
 def _encode(rgb: np.ndarray) -> bytes:
     image = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), mode="RGB")
     buffer = io.BytesIO()
@@ -148,5 +253,13 @@ def _encode(rgb: np.ndarray) -> bytes:
 
 
 def pk3_assets(seed: int = 1) -> dict[str, bytes]:
-    """Every generated file, keyed by its path inside the PK3."""
-    return {f"textures/{SKY}.png": sky_png(seed)}
+    """Every generated file, keyed by its path inside the PK3.
+
+    GZDoom registers by folder: textures/ becomes wall textures, flats/ becomes
+    flats. Each asset gets its own derived seed so adding one does not reshuffle
+    the others and invalidate a golden-file comparison.
+    """
+    assets = {f"textures/{SKY}.png": sky_png(seed)}
+    for index, ground in enumerate(GROUNDS):
+        assets[f"flats/{ground.name}.png"] = ground_png(ground, seed + 101 * (index + 1))
+    return assets

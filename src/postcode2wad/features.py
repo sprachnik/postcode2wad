@@ -311,9 +311,16 @@ def sea_from_coastline(
     return shapes
 
 
-def water_to_shapes(features: list[Feature], tile: Tile, simplify_m: float = 1.0) -> list[Shape]:
+def areas_to_shapes(
+    features: list[Feature],
+    tile: Tile,
+    simplify_m: float = 1.0,
+    min_area_m2: float = 0.0,
+) -> list[Shape]:
+    """Closed ways to map polygons, tags carried through."""
     clip = tile_clip(tile)
     simplify_units = simplify_m * UNITS_PER_METRE
+    min_area_units = min_area_m2 * UNITS_PER_METRE * UNITS_PER_METRE
 
     shapes: list[Shape] = []
     for feature in features:
@@ -321,5 +328,26 @@ def water_to_shapes(features: list[Feature], tile: Tile, simplify_m: float = 1.0
         if poly is None:
             continue
         for part in _clean(poly, clip, simplify_units):
+            if part.area < min_area_units:
+                continue
             shapes.append(Shape(polygon=part, tags=feature.tags))
     return shapes
+
+
+def water_to_shapes(features: list[Feature], tile: Tile, simplify_m: float = 1.0) -> list[Shape]:
+    return areas_to_shapes(features, tile, simplify_m)
+
+
+def landuse_to_shapes(
+    features: list[Feature],
+    tile: Tile,
+    simplify_m: float = 1.5,
+    min_area_m2: float = 40.0,
+) -> list[Shape]:
+    """Land-cover parcels: fields, parks, car parks, gardens.
+
+    Simplified harder than buildings and with a bigger floor on area, because
+    the exact outline of a field is not load-bearing and every vertex here has
+    to be paid for in the planar arrangement.
+    """
+    return areas_to_shapes(features, tile, simplify_m, min_area_m2)

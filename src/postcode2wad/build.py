@@ -18,6 +18,7 @@ from shapely.geometry import Point, Polygon
 from . import UNITS_PER_METRE, textures
 from .features import (
     buildings_to_shapes,
+    landuse_to_shapes,
     roads_to_shapes,
     sea_from_coastline,
     tile_clip,
@@ -68,6 +69,7 @@ class BuildStats:
     roads: int = 0
     water: int = 0
     sea: int = 0
+    landuse: int = 0
     terrain_bands: int = 0
     sectors: int = 0
     linedefs: int = 0
@@ -78,7 +80,7 @@ class BuildStats:
         low, high = self.elevation_range_m
         return (
             f"{self.buildings} buildings, {self.roads} road pieces, "
-            f"{self.water} water, {self.sea} sea, "
+            f"{self.water} water, {self.sea} sea, {self.landuse} land parcels, "
             f"{self.terrain_bands} terrain bands, terrain {low:.1f}-{high:.1f}m\n"
             f"{self.sectors} sectors, {self.linedefs} linedefs"
         )
@@ -173,6 +175,7 @@ def build_tile(
     with_terrain: bool = True,
     with_roads: bool = True,
     with_water: bool = True,
+    with_landuse: bool = True,
 ) -> BuiltMap:
     tile = Tile.containing(place.easting, place.northing, size_m)
     stats = BuildStats()
@@ -228,6 +231,29 @@ def build_tile(
         if dtm is None:
             return 0.0
         return ground_height_m(dtm, tile, polygon)
+
+    if with_landuse:
+        # Land cover changes the *surface*, not the height, so each parcel is
+        # cut against the contour bands and each piece keeps its band's floor.
+        # Laying a parcel down flat instead would iron a field into a plateau.
+        for shape in landuse_to_shapes(features.landuse, tile):
+            flat = textures.land_cover(shape.tags)
+            if flat is None:
+                continue  # unrecognised: leave the terrain showing through
+            for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
+                specs.append(
+                    SectorSpec(
+                        polygon=piece,
+                        floor=round(elevation_m * UNITS_PER_METRE),
+                        ceiling=sky_height,
+                        floor_tex=flat,
+                        # Risers inside a parcel wear the parcel's own cover, so
+                        # a contour step in a ploughed field is ploughed too.
+                        wall_tex=flat,
+                        light=DAYLIGHT,
+                    )
+                )
+            stats.landuse += 1
 
     if with_water:
         # Sea first, so an inland lake or a river mouth laid over it still wins.
