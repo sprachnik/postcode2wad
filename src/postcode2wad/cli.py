@@ -31,11 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--contour-step",
         type=float,
-        default=0.5,
+        default=None,
         metavar="METRES",
         help=(
-            "terrain quantisation step; larger means fewer sectors but must stay "
-            "at or below 0.75 or the player cannot climb it (default: 0.5)"
+            "terrain quantisation step; larger means fewer sectors. Defaults to "
+            "2.0 with slopes, or 0.5 without, where it must stay at or below "
+            "0.75 or the player cannot climb the terrain"
         ),
     )
     parser.add_argument(
@@ -45,11 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-water", action="store_true", help="skip water bodies")
     parser.add_argument("--no-trees", action="store_true", help="skip tree sprites")
     parser.add_argument(
-        "--slopes",
+        "--no-slopes",
         action="store_true",
         help=(
-            "slope the ground instead of stepping it; implies a coarser contour "
-            "step, since the 24-unit climb limit no longer applies"
+            "step the ground into flat contour bands instead of sloping it. "
+            "Slopes are the default: they look better and use about a third of "
+            "the sectors, because the contour step can be four times coarser"
         ),
     )
     parser.add_argument(
@@ -217,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
         "with_landuse": not args.no_landuse,
         "with_barriers": not args.no_barriers,
         "with_trees": not args.no_trees,
-        "with_slopes": args.slopes,
+        "with_slopes": not args.no_slopes,
     }
 
     if args.region > 0:
@@ -230,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             cache_dir=cache_dir,
             refresh=args.refresh,
             contour_step_m=args.contour_step,
-            with_slopes=args.slopes,
+            with_slopes=not args.no_slopes,
             with_terrain=not args.no_terrain,
             with_roads=not args.no_roads,
             with_water=not args.no_water,

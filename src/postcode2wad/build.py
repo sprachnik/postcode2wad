@@ -74,6 +74,12 @@ ROOF_LIGHT = 216  # unshaded, facing straight up
 ROAD_LIGHT = 200  # in the lee of buildings and kerbs more often than not
 WATER_LIGHT = 216
 
+#: Contour step by mode. The flat value must stay at or below 0.75m (Doom's
+#: 24-unit step); the sloped one only controls how finely the ground is cut into
+#: sectors, since the height itself comes from a per-sector plane.
+DEFAULT_FLAT_STEP_M = 0.5
+DEFAULT_SLOPED_STEP_M = 2.0
+
 PLAYER_START = 1
 
 PAVED_FOOTWAYS = {"footway", "path", "pedestrian", "steps", "cycleway", "bridleway"}
@@ -226,17 +232,24 @@ def build_tile(
     size_m: int = 400,
     cache_dir: Path | None = None,
     refresh: bool = False,
-    contour_step_m: float = 0.5,
+    contour_step_m: float | None = None,
     with_terrain: bool = True,
     with_roads: bool = True,
     with_water: bool = True,
     with_landuse: bool = True,
     with_barriers: bool = True,
     with_trees: bool = True,
-    with_slopes: bool = False,
+    with_slopes: bool = True,
     tile: Tile | None = None,
     features: overpass.TileFeatures | None = None,
 ) -> BuiltMap:
+    # Sloped ground is not bound by Doom's 24-unit climb limit, so the contour
+    # step can be four times coarser — which is where the sector saving comes
+    # from. Flat ground still has to stay under the limit, or the terrain
+    # renders perfectly and cannot be walked up.
+    if contour_step_m is None:
+        contour_step_m = DEFAULT_SLOPED_STEP_M if with_slopes else DEFAULT_FLAT_STEP_M
+
     # A region pack builds tiles the postcode does not sit in, so the caller can
     # name the tile directly. Without an override the postcode picks it.
     if tile is None:
