@@ -12,7 +12,9 @@ gzdoom -iwad freedoom2.wad -file birchington.pk3 +map MAP01
 
 ## Status
 
-**M0 (geometry proof), M1 (real data) and most of M2 (dressing) are done and playable.**
+**M0 (geometry proof), M1 (real data), M2 (dressing) and M4 (region packs) are done and
+playable, and both data sources now read from local extracts so a whole county is in
+reach.**
 Give it a UK postcode and it produces a PK3 that loads clean in GZDoom 4.14 with
 Freedoom Phase 2: real building footprints at LIDAR-measured heights, roads with kerbs,
 terrain contoured from 1m Environment Agency LIDAR, land cover from OSM tags, hedges
@@ -30,13 +32,27 @@ postcode2wad "CT1 2EH" --size 400 --out birchington.pk3 --preview plan.png
 ```
 CT1 2EH — Birchington, Thanet  (51.36099, 1.26650)  OSGB 627500E 167500N
 tile bng400-1574-423  (400m square)
-74 buildings, 350 road pieces, 0 water, 0 sea, 37 land parcels, 40 barriers,
-629 trees, 113 terrain bands, terrain 13.0-22.0m
-3781 sectors, 14486 linedefs
+74 buildings, 90 road pieces, 0 water, 0 sea, 0 beach, 41 land parcels, 33 barriers,
+574 trees, 12 terrain bands, terrain 12.0-20.0m
+5346 sectors, 8366 linedefs
 ```
 
-Still to come in M2: street-name signs and the geolocation HUD. See
-[`TODO.md`](TODO.md) for the working list — including the known rough edges — and
+The terrain slopes continuously rather than stepping: every ground triangle carries a
+floor plane fitted through its own corners, so adjacent faces meet exactly. Roads take
+their height from a smoothed profile along the way's centreline instead of the 2-D
+LIDAR field, because a pavement is an engineered surface — level across its width and
+graded along its length — and fitting one to a noisy raster reproduces the noise.
+
+A region pack builds a block of neighbouring tiles into one PK3 with a level change at
+each tile edge, and a ZScript HUD carries a minimap, compass and live lat/lng:
+
+```
+postcode2wad "CT1 2EH" --size 800 --region 1 --out out/birchington-area.pk3
+```
+
+Still to come: street-name signs, and a parallel build harness for county-scale runs.
+See [`TODO.md`](TODO.md) for the working list — including the known rough edges —
+[`CLAUDE.md`](CLAUDE.md) for how to work on it without repeating old mistakes, and
 [`docs/brief.md`](docs/brief.md) for the full brief and milestones.
 
 ## How it works
@@ -75,6 +91,10 @@ wrong again:
   too.
 - **A Doom sprite hangs downward from its top offset.** Pillow writes no `grAb` chunk,
   the engine reads the offset as zero, and the whole sprite renders below the floor.
+- **A one-sided line away from the map edge is a wall from the ground to the sky.**
+  Outdoor ceilings are ~130m, so an orphaned edge — one claimed by a single face rather
+  than two — is not a hairline crack but a grass-textured blade the height of a tower
+  block. Dropping a degenerate face orphans every edge it owned.
 - **A texture pixel is one map unit.** A 128px brick texture therefore spans 4m of wall,
   making every brick course about 40cm — three times life size. Nothing announces this;
   it just makes buildings feel wrong.
