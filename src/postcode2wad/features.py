@@ -311,6 +311,64 @@ def sea_from_coastline(
     return shapes
 
 
+#: (width, height) in metres by OSM `barrier` value.
+#:
+#: Anything absent is skipped on purpose. Most other barrier values are nodes
+#: rather than ways (bollard, gate, stile, cattle_grid), and several are
+#: *negative* features — a ditch or a sunken kerb extruded upward as a block
+#: would be actively wrong.
+BARRIERS = {
+    "hedge": (0.9, 1.7),
+    "hedge_bank": (1.2, 1.8),
+    "fence": (0.15, 1.3),
+    "wall": (0.35, 1.8),
+    "dry_stone_wall": (0.5, 1.4),
+    "retaining_wall": (0.4, 1.0),
+    "city_wall": (0.8, 4.0),
+    "guard_rail": (0.1, 0.8),
+    "handrail": (0.08, 1.0),
+}
+
+
+def barriers_to_shapes(
+    features: list[Feature],
+    tile: Tile,
+    simplify_m: float = 0.5,
+) -> list[Shape]:
+    """Hedges, fences and garden walls as thin extruded corridors.
+
+    These matter out of all proportion to their size. A British street is
+    legible mostly through its property boundaries — take the hedges away and a
+    row of houses becomes free-standing blocks in a shared field, which is
+    exactly how the first tiles read.
+
+    Like coastline these are open ways, so they are buffered rather than filled,
+    with flat caps so a hedge meeting a wall butts up instead of overshooting.
+    """
+    clip = tile_clip(tile)
+    simplify_units = simplify_m * UNITS_PER_METRE
+
+    shapes: list[Shape] = []
+    for feature in features:
+        size = BARRIERS.get(feature.tags.get("barrier", ""))
+        if size is None:
+            continue
+        width_m, height_m = size
+
+        line = _map_line(feature, tile)
+        if line is None:
+            continue
+
+        corridor = line.buffer(
+            max(width_m, 0.25) * UNITS_PER_METRE / 2.0,
+            cap_style=2,
+            join_style=2,
+        )
+        for part in _clean(corridor, clip, simplify_units):
+            shapes.append(Shape(polygon=part, tags=feature.tags, height_m=height_m))
+    return shapes
+
+
 def areas_to_shapes(
     features: list[Feature],
     tile: Tile,

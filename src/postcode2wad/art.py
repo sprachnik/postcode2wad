@@ -245,6 +245,65 @@ def ground_png(ground: Ground, seed: int = 1, size: int = FLAT_SIZE) -> bytes:
     return _encode(rgb)
 
 
+#: Barrier textures are 128x64, mapped 1:1, so they cover 4m across by 2m up at
+#: 32 pixels per metre. Doom draws a lower texture downward from the top of the
+#: riser, which for a barrier means the top of the texture lands on the top of
+#: the hedge or fence — so detail belongs at the top of the image, and the
+#: bottom is what gets cropped on a short one.
+BARRIER_WIDTH = 128
+BARRIER_HEIGHT = 64
+
+HEDGE = "DMHEDGE"
+FENCE = "DMFENCE"
+
+
+def hedge_png(seed: int = 1) -> bytes:
+    """Clipped privet: dense, dark, and lit from above."""
+    rng = np.random.default_rng(seed)
+    w, h = BARRIER_WIDTH, BARRIER_HEIGHT
+
+    leaf = _fbm(rng, h, w, cx=8, cy=4, octaves=4, wrap_y=True)
+    clump = _fbm(rng, h, w, cx=3, cy=2, octaves=2, wrap_y=True)
+
+    # Sunlight falls on the top of a hedge and barely reaches the bottom; that
+    # vertical ramp does more for the shape than any amount of leaf detail.
+    ramp = np.linspace(1.18, 0.62, h)[:, None]
+    shade = ramp * (0.80 + 0.40 * leaf) * (0.88 + 0.24 * clump)
+
+    base = np.array((54, 78, 42), dtype=float)
+    rgb = base[None, None, :] * shade[..., None]
+    # A few pale leaves catching the light, so it is not a flat green slab.
+    highlight = (leaf > 0.74)[..., None]
+    rgb = np.where(highlight, rgb * 1.35, rgb)
+    return _encode(rgb)
+
+
+def fence_png(seed: int = 1) -> bytes:
+    """Closeboard timber: vertical boards, each a slightly different tone."""
+    rng = np.random.default_rng(seed)
+    w, h = BARRIER_WIDTH, BARRIER_HEIGHT
+
+    board_px = 5  # ~150mm at 32 px/m
+    xs = np.arange(w)
+    board_id = xs // board_px
+    tone = rng.uniform(0.82, 1.12, board_id.max() + 1)[board_id][None, :]
+
+    # Wood grain runs along the board, so the noise is stretched vertically.
+    grain = _fbm(rng, h, w, cx=w // 4, cy=1, octaves=3, wrap_y=True)
+    shade = tone * (0.88 + 0.24 * grain)
+
+    # The dark gap between boards is what makes it read as boards at all.
+    shade = np.where((xs % board_px == 0)[None, :], shade * 0.55, shade)
+
+    base = np.array((132, 104, 72), dtype=float)
+    rgb = base[None, None, :] * shade[..., None]
+
+    # Capping rail across the top two rows — the top of the texture is the top
+    # of the fence, so this lands where it should on any fence height.
+    rgb[:2, :, :] = base[None, None, :] * 0.72
+    return _encode(rgb)
+
+
 def _encode(rgb: np.ndarray) -> bytes:
     image = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), mode="RGB")
     buffer = io.BytesIO()
@@ -259,7 +318,11 @@ def pk3_assets(seed: int = 1) -> dict[str, bytes]:
     flats. Each asset gets its own derived seed so adding one does not reshuffle
     the others and invalidate a golden-file comparison.
     """
-    assets = {f"textures/{SKY}.png": sky_png(seed)}
+    assets = {
+        f"textures/{SKY}.png": sky_png(seed),
+        f"textures/{HEDGE}.png": hedge_png(seed + 11),
+        f"textures/{FENCE}.png": fence_png(seed + 13),
+    }
     for index, ground in enumerate(GROUNDS):
         assets[f"flats/{ground.name}.png"] = ground_png(ground, seed + 101 * (index + 1))
     return assets

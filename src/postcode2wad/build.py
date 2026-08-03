@@ -17,6 +17,7 @@ from shapely.geometry import Point, Polygon
 
 from . import UNITS_PER_METRE, textures
 from .features import (
+    barriers_to_shapes,
     buildings_to_shapes,
     landuse_to_shapes,
     roads_to_shapes,
@@ -70,6 +71,7 @@ class BuildStats:
     water: int = 0
     sea: int = 0
     landuse: int = 0
+    barriers: int = 0
     terrain_bands: int = 0
     sectors: int = 0
     linedefs: int = 0
@@ -81,6 +83,7 @@ class BuildStats:
         return (
             f"{self.buildings} buildings, {self.roads} road pieces, "
             f"{self.water} water, {self.sea} sea, {self.landuse} land parcels, "
+            f"{self.barriers} barriers, "
             f"{self.terrain_bands} terrain bands, terrain {low:.1f}-{high:.1f}m\n"
             f"{self.sectors} sectors, {self.linedefs} linedefs"
         )
@@ -176,6 +179,7 @@ def build_tile(
     with_roads: bool = True,
     with_water: bool = True,
     with_landuse: bool = True,
+    with_barriers: bool = True,
 ) -> BuiltMap:
     tile = Tile.containing(place.easting, place.northing, size_m)
     stats = BuildStats()
@@ -302,6 +306,26 @@ def build_tile(
                     )
                 )
                 stats.roads += 1
+
+    if with_barriers:
+        # After roads so a hedge along a verge survives, before buildings so a
+        # house laid over one still wins — the hedge stops at the wall.
+        for shape in barriers_to_shapes(features.barriers, tile):
+            wall = textures.barrier_wall(shape.tags)
+            for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
+                specs.append(
+                    SectorSpec(
+                        polygon=piece,
+                        floor=round((elevation_m + shape.height_m) * UNITS_PER_METRE),
+                        ceiling=sky_height,
+                        floor_tex=textures.HEDGE_TOP
+                        if wall == textures.HEDGE
+                        else textures.CONCRETE,
+                        wall_tex=wall,
+                        light=DAYLIGHT,
+                    )
+                )
+            stats.barriers += 1
 
     building_shapes = buildings_to_shapes(features.buildings, tile)
     for shape in building_shapes:

@@ -41,6 +41,7 @@ TILE_SELECTORS = [
     'relation["natural"="water"]',
     'way["natural"="coastline"]',
     'way["waterway"="riverbank"]',
+    'way["barrier"]',
     'way["landuse"]',
     'way["leisure"]',
 ]
@@ -69,6 +70,8 @@ class TileFeatures:
     landuse: list[Feature] = field(default_factory=list)
     #: Open ways, not areas — see `features.sea_from_coastline`.
     coastline: list[Feature] = field(default_factory=list)
+    #: Hedges, fences and garden walls. Also open ways: extruded, not filled.
+    barriers: list[Feature] = field(default_factory=list)
 
     def __len__(self) -> int:
         return (
@@ -77,6 +80,7 @@ class TileFeatures:
             + len(self.water)
             + len(self.landuse)
             + len(self.coastline)
+            + len(self.barriers)
         )
 
 
@@ -125,6 +129,8 @@ def fetch_tile(
                 out.buildings.append(feature)
         elif "highway" in tags:
             out.roads.append(feature)
+        elif "barrier" in tags and "waterway" not in tags:
+            out.barriers.append(feature)
         elif tags.get("natural") == "coastline":
             # Deliberately no `closed` check: the coast of Great Britain is a
             # single open way thousands of kilometres long, and what arrives here
