@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from shapely.affinity import affine_transform
-from shapely.geometry import Polygon, shape
+from shapely.geometry import Polygon, box, shape
 
 from . import UNITS_PER_METRE
 from .sources.lidar import Raster
@@ -82,6 +82,7 @@ def contour_bands(
     matrix = _osgb_to_map_matrix(tile)
     simplify_units = simplify_m * UNITS_PER_METRE
     min_area_units = min_area_m2 * UNITS_PER_METRE * UNITS_PER_METRE
+    square = box(0, 0, tile.size_units, tile.size_units)
 
     bands: list[TerrainBand] = []
     for geom, value in shapes(banded, transform=transform, connectivity=4):
@@ -108,6 +109,18 @@ def contour_bands(
             poly = poly.buffer(simplify_units, join_style=2)
             if not isinstance(poly, Polygon) or poly.is_empty:
                 continue
+
+        # Clip back to the tile. The DTM is fetched for a window at least as
+        # large as the tile and the dilation above pushes bands a further 1.2m
+        # out, so without this the map's outer boundary is a ragged fringe of
+        # band edges instead of the tile square. Every segment of that fringe is
+        # a one-sided line, and each one renders as a tear in the world with an
+        # infinite flat plane behind it. Squaring the edge off removes them at
+        # source — and it is required anyway for tile-edge determinism, since a
+        # neighbouring tile cannot agree with a boundary that wanders.
+        poly = poly.intersection(square)
+        if poly.is_empty or not isinstance(poly, Polygon):
+            continue
 
         bands.append(TerrainBand(polygon=poly, elevation_m=float(value) * step_m))
 

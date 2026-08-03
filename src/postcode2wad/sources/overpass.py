@@ -39,6 +39,7 @@ TILE_SELECTORS = [
     'way["highway"]',
     'way["natural"="water"]',
     'relation["natural"="water"]',
+    'way["natural"="coastline"]',
     'way["waterway"="riverbank"]',
     'way["landuse"]',
     'way["leisure"]',
@@ -66,9 +67,17 @@ class TileFeatures:
     roads: list[Feature] = field(default_factory=list)
     water: list[Feature] = field(default_factory=list)
     landuse: list[Feature] = field(default_factory=list)
+    #: Open ways, not areas — see `features.sea_from_coastline`.
+    coastline: list[Feature] = field(default_factory=list)
 
     def __len__(self) -> int:
-        return len(self.buildings) + len(self.roads) + len(self.water) + len(self.landuse)
+        return (
+            len(self.buildings)
+            + len(self.roads)
+            + len(self.water)
+            + len(self.landuse)
+            + len(self.coastline)
+        )
 
 
 def build_query(bbox: tuple[float, float, float, float], selectors: list[str]) -> str:
@@ -116,6 +125,11 @@ def fetch_tile(
                 out.buildings.append(feature)
         elif "highway" in tags:
             out.roads.append(feature)
+        elif tags.get("natural") == "coastline":
+            # Deliberately no `closed` check: the coast of Great Britain is a
+            # single open way thousands of kilometres long, and what arrives here
+            # is whatever fragment of it crosses the tile.
+            out.coastline.append(feature)
         elif tags.get("natural") == "water" or tags.get("waterway") == "riverbank":
             if feature.closed:
                 out.water.append(feature)

@@ -129,6 +129,11 @@ def build_geometry(
     if not faces:
         raise ValueError("arrangement produced no faces — check input polygons")
 
+    # The outer edge of the whole arrangement, used below to tell a genuine
+    # horizon from a hole. Taken from the inputs rather than the surviving faces
+    # so that dropping a sliver on the tile edge cannot shrink it.
+    min_x, min_y, max_x, max_y = unary_union([s.polygon for s in specs]).bounds
+
     # Assign each face to the last spec containing it. Buildings are passed
     # after terrain, so they win the overlap.
     owned: list[tuple[Polygon, SectorSpec]] = []
@@ -198,8 +203,12 @@ def build_geometry(
         line: dict = {"v1": v1, "v2": v2, "sidefront": sidefront}
 
         if back_face is None:
-            # One-sided lines only ever occur on the tile perimeter — every
-            # interior boundary has a face on both sides by construction.
+            # A one-sided line is *usually* the tile perimeter, but not always:
+            # `min_face_area` discards sliver faces, and every edge the discarded
+            # face used to back onto is left with a single user. Those interior
+            # orphans must be plain walls. Stamping Line_Horizon on one turns it
+            # into a window onto an infinite flat plane — which is precisely what
+            # it looks like in game, a tear in the world with a void behind it.
             geo.sidedefs.append(
                 {
                     "sector": face_sector[front_face],
@@ -208,7 +217,7 @@ def build_geometry(
                 }
             )
             line["blocking"] = True
-            if horizon_border:
+            if horizon_border and _on_border(p, q, min_x, min_y, max_x, max_y):
                 line["special"] = LINE_HORIZON
         else:
             back_spec = face_spec[back_face]
@@ -241,6 +250,28 @@ def build_geometry(
     geo.things = list(things or [])
     _drop_empty_sectors(geo)
     return geo
+
+
+def _on_border(
+    p: Coord,
+    q: Coord,
+    min_x: float,
+    min_y: float,
+    max_x: float,
+    max_y: float,
+    tolerance: float = 1.0,
+) -> bool:
+    """True if the segment p->q lies along one edge of the arrangement's bbox.
+
+    Both endpoints have to sit on the *same* edge. Testing them independently
+    would accept a line running corner to corner across the map.
+    """
+    return (
+        (abs(p[0] - min_x) <= tolerance and abs(q[0] - min_x) <= tolerance)
+        or (abs(p[0] - max_x) <= tolerance and abs(q[0] - max_x) <= tolerance)
+        or (abs(p[1] - min_y) <= tolerance and abs(q[1] - min_y) <= tolerance)
+        or (abs(p[1] - max_y) <= tolerance and abs(q[1] - max_y) <= tolerance)
+    )
 
 
 def _scale(spec: SectorSpec, part: str) -> dict:

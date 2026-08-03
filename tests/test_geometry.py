@@ -81,3 +81,44 @@ def test_textmap_round_trip_is_wellformed():
     assert "type = 1;" in text
     # Every block must be closed and every assignment terminated.
     assert text.count("{") == text.count("}")
+
+
+def test_interior_orphan_lines_are_walls_not_horizons():
+    """A one-sided line away from the tile edge must be solid, not a horizon.
+
+    `min_face_area` discards sliver faces, orphaning the edges they backed onto.
+    Those edges are one-sided but they are *not* the map boundary, and giving
+    them Line_Horizon renders each as a window onto an infinite flat plane —
+    tears in the scenery, dotted all over a real tile.
+    """
+    from shapely.geometry import Polygon
+
+    from postcode2wad.geometry import LINE_HORIZON, SectorSpec, build_geometry
+
+    ground = Polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)])
+    # A spike thin enough that the arrangement face under it falls below
+    # min_face_area and gets dropped, orphaning the edges around it.
+    spike = Polygon([(500, 500), (501, 500), (500.5, 501)])
+
+    geo = build_geometry(
+        [
+            SectorSpec(polygon=ground, floor=0, ceiling=4096, floor_tex="GRASS1"),
+            SectorSpec(polygon=spike, floor=64, ceiling=4096, floor_tex="GRASS1"),
+        ],
+        min_face_area=64.0,
+    )
+
+    for line in geo.linedefs:
+        if "sideback" in line and line["sideback"] is not None:
+            continue
+        if line.get("special") != LINE_HORIZON:
+            continue
+        v1 = geo.vertices[line["v1"]]
+        v2 = geo.vertices[line["v2"]]
+        on_edge = (
+            (v1[0] == v2[0] == 0)
+            or (v1[0] == v2[0] == 1000)
+            or (v1[1] == v2[1] == 0)
+            or (v1[1] == v2[1] == 1000)
+        )
+        assert on_edge, f"horizon special on an interior line {v1}->{v2}"

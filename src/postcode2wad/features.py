@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shapely.geometry import LineString, MultiPolygon, Polygon, box
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import polygonize, unary_union
 
 from . import UNITS_PER_METRE
 from .sources.overpass import Feature
@@ -226,6 +227,87 @@ def roads_to_shapes(
         )
         for part in _clean(corridor, clip, simplify_units):
             shapes.append(Shape(polygon=part, tags=feature.tags))
+    return shapes
+
+
+def _map_line(feature: Feature, tile: Tile) -> LineString | None:
+    """A feature's coordinates as a map-unit LineString, or None if degenerate."""
+    points = [tile.to_map_lonlat(lon, lat) for lon, lat in feature.coords]
+    deduped = [points[0]] if points else []
+    for point in points[1:]:
+        if point != deduped[-1]:
+            deduped.append(point)
+    return LineString(deduped) if len(deduped) >= 2 else None
+
+
+def _leftward(line: LineString, point: Point) -> float:
+    """Signed area of the turn from the line's local direction to `point`.
+
+    Positive means the point lies to the left of the way's direction of travel.
+    The tangent is sampled either side of the projected position rather than
+    taken from the nearest vertex, so a point off a smooth curve gets the local
+    heading instead of whichever segment happened to end closest.
+    """
+    along = line.project(point)
+    reach = min(8.0, line.length / 2.0)
+    a = line.interpolate(max(0.0, along - reach))
+    b = line.interpolate(min(line.length, along + reach))
+    return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+
+
+def sea_from_coastline(
+    features: list[Feature],
+    tile: Tile,
+    simplify_m: float = 1.0,
+) -> list[Shape]:
+    """Close `natural=coastline` against the tile edge to produce sea polygons.
+
+    Coastline is the one piece of OSM water that is not an area. The coast of
+    Great Britain is a single directed way, and the only thing marking which
+    side is wet is a *winding convention*: land lies to the LEFT of the
+    direction of travel, sea to the right. There is no tag to read.
+
+    So the sea has to be constructed: node the coastline fragments against the
+    tile square, polygonize, and keep the faces that fall on the seaward side.
+    That is the same planar-arrangement trick `geometry.py` uses on buildings,
+    for the same reason — it is the only approach that copes with a coast that
+    enters and leaves the tile several times, doubles back into an inlet, or
+    encloses an island.
+
+    Known gap: a tile entirely at sea contains no coastline at all and therefore
+    generates as dry land. Deciding that case needs a land polygon from outside
+    the tile, which this does not fetch.
+    """
+    clip = tile_clip(tile)
+
+    lines: list[LineString] = []
+    for feature in features:
+        line = _map_line(feature, tile)
+        if line is None:
+            continue
+        part = line.intersection(clip)
+        if part.is_empty:
+            continue
+        for geom in getattr(part, "geoms", [part]):
+            if isinstance(geom, LineString) and geom.length > 0:
+                lines.append(geom)
+
+    if not lines:
+        return []
+
+    noded = unary_union([LineString(clip.exterior.coords), *lines])
+    simplify_units = simplify_m * UNITS_PER_METRE
+
+    shapes: list[Shape] = []
+    for face in polygonize(noded):
+        if face.is_empty or not face.is_valid:
+            continue
+        probe = face.representative_point()
+        nearest = min(lines, key=lambda line: line.distance(probe))
+        if _leftward(nearest, probe) >= 0:
+            continue  # land side
+        for part in _clean(face, clip, simplify_units):
+            shapes.append(Shape(polygon=part, tags={"natural": "coastline"}))
     return shapes
 
 

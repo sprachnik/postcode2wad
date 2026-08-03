@@ -16,7 +16,13 @@ from pathlib import Path
 from shapely.geometry import Point, Polygon
 
 from . import UNITS_PER_METRE, textures
-from .features import buildings_to_shapes, roads_to_shapes, tile_clip, water_to_shapes
+from .features import (
+    buildings_to_shapes,
+    roads_to_shapes,
+    sea_from_coastline,
+    tile_clip,
+    water_to_shapes,
+)
 from .geometry import MapGeometry, SectorSpec, Thing, build_geometry
 from .sources import lidar, overpass
 from .sources.postcodes import Place
@@ -29,6 +35,17 @@ SKY_CLEARANCE = 4096
 #: Roads sit a kerb's depth below the surrounding ground.
 KERB_UNITS = 8
 WATER_DEPTH_UNITS = 20
+
+#: Mean sea level, in metres above ordnance datum. Zero by definition — ODN *is*
+#: mean sea level at Newlyn — so no measurement is needed and every coastal tile
+#: in the country agrees on it for free.
+SEA_LEVEL_M = 0.0
+
+#: How far the sea surface sits below the datum. Exactly one Doom step: a Doom
+#: player can climb 24 units and no more, so at 24 you can wade off a beach and
+#: back out again, while a 10m chalk cliff is still a cliff. (There is no
+#: separate water plane without 3D floors — the sector floor *is* the surface.)
+SEA_SURFACE_UNITS = -24
 
 #: Sector light levels. The old default of 192 everywhere is interior gloom —
 #: correct for a bunker, wrong for a Tuesday afternoon in Kent. Depth now comes
@@ -50,6 +67,7 @@ class BuildStats:
     buildings: int = 0
     roads: int = 0
     water: int = 0
+    sea: int = 0
     terrain_bands: int = 0
     sectors: int = 0
     linedefs: int = 0
@@ -59,7 +77,8 @@ class BuildStats:
     def summary(self) -> str:
         low, high = self.elevation_range_m
         return (
-            f"{self.buildings} buildings, {self.roads} road pieces, {self.water} water, "
+            f"{self.buildings} buildings, {self.roads} road pieces, "
+            f"{self.water} water, {self.sea} sea, "
             f"{self.terrain_bands} terrain bands, terrain {low:.1f}-{high:.1f}m\n"
             f"{self.sectors} sectors, {self.linedefs} linedefs"
         )
@@ -211,6 +230,20 @@ def build_tile(
         return ground_height_m(dtm, tile, polygon)
 
     if with_water:
+        # Sea first, so an inland lake or a river mouth laid over it still wins.
+        for shape in sea_from_coastline(features.coastline, tile):
+            specs.append(
+                SectorSpec(
+                    polygon=shape.polygon,
+                    floor=round(SEA_LEVEL_M * UNITS_PER_METRE) + SEA_SURFACE_UNITS,
+                    ceiling=sky_height,
+                    floor_tex=textures.WATER,
+                    wall_tex=textures.BANK,
+                    light=WATER_LIGHT,
+                )
+            )
+            stats.sea += 1
+
         for shape in water_to_shapes(features.water, tile):
             level = round(terrain_at(shape.polygon) * UNITS_PER_METRE)
             specs.append(
