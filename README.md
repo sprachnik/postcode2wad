@@ -45,8 +45,9 @@ Still to come in M2: street-name signs and the geolocation HUD. See
 2. That picks a **British National Grid tile** — generation is a pure function of the
    tile ID, so neighbouring tiles agree along their shared edge.
 3. **Environment Agency LIDAR** 1m DTM and DSM arrive as GeoTIFF over WCS.
-4. **Overpass** supplies buildings, roads, water, coastline, land use and barriers in a
-   single cached query per tile.
+4. **OpenStreetMap** supplies buildings, roads, water, coastline, land use and barriers,
+   in a single query per tile — off a local `.osm.pbf` extract if there is one, else
+   from the **Overpass API** (see "Building more than a few tiles" below).
 5. The DTM is quantised into *absolute* elevation bands and polygonised into contours.
 6. Everything is thrown into a **planar arrangement** (`geometry.py`) — the step that
    turns overlapping real-world polygons into the topology Doom actually requires.
@@ -77,6 +78,28 @@ wrong again:
   making every brick course about 40cm — three times life size. Nothing announces this;
   it just makes buildings feel wrong.
 
+## Building more than a few tiles
+
+Overpass is donated infrastructure and rate-limits at around **nine tiles**. Kent at
+800m is 5,800 tiles, so bulk generation reads OSM off a local extract instead:
+
+```
+curl -O https://download.geofabrik.de/europe/united-kingdom/england/kent-latest.osm.pbf
+move kent-latest.osm.pbf data\
+postcode2wad "CT1 2EH" --size 800 --out out/tile.pk3      # uses it automatically
+```
+
+The first run scans the file once (51s for Kent's 50MB, 762k ways) into an index under
+`cache/osmpbf/`; every tile after that is a query against the index — **3ms median, 20ms
+p95, 80ms worst case** on an 800m tile, against 131s over Overpass. The index is keyed on
+the extract's path, size and mtime, so a fresh download rebuilds it rather than serving
+stale roads.
+
+`--osm-source` picks the reader: `auto` (default — the extract if one covers the tile,
+Overpass otherwise), `local`, or `overpass`. `--osm-extract PATH` or `$POSTCODE2WAD_OSM_EXTRACT`
+names the file; otherwise the first `data/*.osm.pbf` is used. Both readers produce
+byte-identical PK3s — that is pinned by `tests/test_osmpbf.py`.
+
 ## Fixed technical decisions
 
 | Decision | Choice |
@@ -84,7 +107,7 @@ wrong again:
 | Engine target | GZDoom, UDMF map format |
 | Scale | 32 map units ≈ 1 metre (player 56 units tall) |
 | Assets | Freedoom IWAD — no `doom2.wad` dependency |
-| Stack | Python 3.11+ — rasterio, shapely 2.x, pyproj, numpy, requests |
+| Stack | Python 3.11+ — rasterio, shapely 2.x, pyproj, numpy, requests, pyosmium |
 | Determinism | Generation is a pure function of a British National Grid tile ID |
 
 ## Development

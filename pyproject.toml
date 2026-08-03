@@ -18,6 +18,12 @@ dependencies = [
     "requests>=2.31",
     # Not optional any more: every PK3 ships generated art (art.py).
     "pillow>=10.0",
+    # Reads .osm.pbf extracts. On PyPI this is `osmium` (the pyosmium project);
+    # imported as `import osmium`. Required for anything bigger than a small
+    # region: Overpass rate-limits at about nine tiles and Kent is 5,800, so a
+    # county has to be read off a local extract. Imported lazily, so an install
+    # that skips it still works against Overpass.
+    "osmium>=4.0",
 ]
 
 [project.optional-dependencies]

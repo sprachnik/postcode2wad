@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .build import BuiltMap, build_tile
-from .sources import overpass
+from .sources import osm
 from .sources.postcodes import Place
 from .tiles import Tile, osgb_to_lonlat
 
@@ -112,6 +112,8 @@ def build_region(
     cache_dir: Path | None = None,
     refresh: bool = False,
     progress=None,
+    osm_source: str = "auto",
+    osm_extract: str | Path | None = None,
     **tile_options,
 ) -> Region:
     """Build a (2*radius+1)^2 block of tiles centred on the postcode's tile.
@@ -130,12 +132,15 @@ def build_region(
     centre = Tile.containing(place.easting, place.northing, size_m)
     region = Region(radius=radius, size_m=size_m)
 
-    # One Overpass query for the whole block, not one per tile. Features get
-    # clipped to each tile downstream anyway, so nine tiles need one round trip
-    # rather than nine — which matters because a 3x3 run was enough to get
-    # rate-limited across every mirror, and this is the shape bulk generation
-    # has to take regardless.
-    features = overpass.fetch_tile(region_bbox_wgs84(centre, radius), cache_dir, refresh)
+    # One query for the whole block, not one per tile. Features get clipped to
+    # each tile downstream anyway, so nine tiles need one round trip rather
+    # than nine — which matters because a 3x3 run was enough to get rate-limited
+    # across every Overpass mirror. Against a local extract the saving is much
+    # smaller (a query is milliseconds either way) but the block query is still
+    # the cheaper shape, so it stays.
+    bbox = region_bbox_wgs84(centre, radius)
+    chosen, extract = osm.choose(bbox, osm_source, osm_extract, cache_dir)
+    features = osm.fetch_tile(bbox, cache_dir, refresh, source=chosen, extract=extract)
 
     index = 0
     for dy in range(-radius, radius + 1):
@@ -154,6 +159,7 @@ def build_region(
                 features=features,
                 **tile_options,
             )
+            built.stats.notes.append(osm.describe(chosen, extract))
             region.tiles.append(RegionTile(tile=tile, map_name=name, built=built))
             index += 1
 

@@ -28,7 +28,7 @@ from .features import (
     water_to_shapes,
 )
 from .geometry import MapGeometry, SectorSpec, Thing, build_geometry
-from .sources import lidar, overpass
+from .sources import lidar, osm, overpass
 from .sources.postcodes import Place
 from .terrain import (
     contour_bands,
@@ -370,6 +370,8 @@ def build_tile(
     tile: Tile | None = None,
     features: overpass.TileFeatures | None = None,
     spawn: tuple[float, float] | None = None,
+    osm_source: str = "auto",
+    osm_extract: str | Path | None = None,
 ) -> BuiltMap:
     # Sloped ground is not bound by Doom's 24-unit climb limit, so the contour
     # step can be four times coarser — which is where the sector saving comes
@@ -439,9 +441,13 @@ def build_tile(
 
     # A region pack fetches one query covering every tile and hands the result
     # to each in turn: features are clipped to the tile downstream anyway, so
-    # nine tiles need one Overpass round trip rather than nine.
+    # nine tiles need one round trip rather than nine.
     if features is None:
-        features = overpass.fetch_tile(tile.bbox_wgs84, cache_dir, refresh)
+        chosen, extract = osm.choose(tile.bbox_wgs84, osm_source, osm_extract, cache_dir)
+        stats.notes.append(osm.describe(chosen, extract))
+        features = osm.fetch_tile(
+            tile.bbox_wgs84, cache_dir, refresh, source=chosen, extract=extract
+        )
 
     def terrain_at(polygon: Polygon) -> float:
         if dtm is None:

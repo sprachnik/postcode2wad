@@ -113,27 +113,50 @@ def fetch_tile(
         payload = _post(query)
         cache.store_json("overpass", query, payload, cache_dir)
 
-    out = TileFeatures()
+    features = []
     for element in payload.get("elements", []):
         geometry = element.get("geometry")
         if not geometry:
+            # Relations answer `out geom;` with per-member geometry and no
+            # top-level `geometry`, so a multipolygon contributes nothing. That
+            # is a known gap, not an accident — see the note on `sort_features`.
             continue
         coords = [(p["lon"], p["lat"]) for p in geometry]
         if len(coords) < 2:
             continue
 
-        tags = element.get("tags", {}) or {}
-        feature = Feature(
-            osm_id=element.get("id", 0),
-            kind=element.get("type", "way"),
-            coords=coords,
-            tags=tags,
-            closed=coords[0] == coords[-1],
+        features.append(
+            Feature(
+                osm_id=element.get("id", 0),
+                kind=element.get("type", "way"),
+                coords=coords,
+                tags=element.get("tags", {}) or {},
+                closed=coords[0] == coords[-1],
+            )
         )
 
+    return sort_features(features)
+
+
+def sort_features(features: list[Feature]) -> TileFeatures:
+    """Split a flat list of ways into the buckets the builder consumes.
+
+    Lives here, apart from the fetching, because there is now more than one
+    thing that can do the fetching — Overpass and a local .osm.pbf extract —
+    and the two must not be allowed to disagree about what counts as a
+    building. One classifier, one set of rules, no drift.
+
+    Order within each bucket is the caller's order and is load-bearing:
+    `geometry.build_geometry` resolves overlaps last-wins, so two overlapping
+    buildings come out differently if they arrive the other way round. Both
+    sources hand this OSM id ascending, which is what Overpass emits.
+    """
+    out = TileFeatures()
+    for feature in features:
+        tags = feature.tags
         # A way can carry several of these tags; classify by precedence.
         if "building" in tags:
-            if feature.closed and len(coords) >= 4:
+            if feature.closed and len(feature.coords) >= 4:
                 out.buildings.append(feature)
         elif "highway" in tags:
             out.roads.append(feature)

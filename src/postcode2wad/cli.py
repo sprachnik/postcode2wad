@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from . import DEFAULT_TILE_SIZE_M, __version__
+from .sources.osm import EXTRACT_ENV, SOURCES
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,6 +84,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-landuse", action="store_true", help="skip land cover; leave all ground as grass"
     )
     parser.add_argument("--refresh", action="store_true", help="bypass the cache and refetch")
+    parser.add_argument(
+        "--osm-source",
+        choices=SOURCES,
+        default="auto",
+        help=(
+            "where OSM vector data comes from. 'auto' uses a local .osm.pbf "
+            "extract when one covers the tile and falls back to the Overpass "
+            "API otherwise; 'local' insists on the extract; 'overpass' insists "
+            "on the network. Overpass rate-limits after about nine tiles, so "
+            "anything larger than a small region needs the extract"
+        ),
+    )
+    parser.add_argument(
+        "--osm-extract",
+        metavar="PBF",
+        default=None,
+        help=(
+            "path to a .osm.pbf (e.g. a Geofabrik county download). Defaults to "
+            f"${EXTRACT_ENV}, then to the first data/*.osm.pbf"
+        ),
+    )
     parser.add_argument(
         "--cache-dir", default="cache", metavar="DIR", help="where to cache API responses"
     )
@@ -242,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         # In a region every tile receives this; only the tile actually
         # containing the point uses it, the rest fall back to their default.
         "spawn": spawn,
+        "osm_source": args.osm_source,
+        "osm_extract": args.osm_extract,
     }
 
     if args.region > 0:
@@ -260,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     print(f"tile {built.tile.id}  ({args.size}m square)")
+    for note in built.stats.notes:
+        print(note)
     print(built.stats.summary())
 
     textmap = emit_textmap(
