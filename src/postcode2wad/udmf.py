@@ -46,6 +46,8 @@ def _thing_fields(thing: Thing) -> dict:
         "y": float(thing.y),
         "angle": thing.angle,
         "type": thing.type,
+        "scalex": float(thing.scale) if thing.scale != 1.0 else None,
+        "scaley": float(thing.scale) if thing.scale != 1.0 else None,
         "skill1": True,
         "skill2": True,
         "skill3": True,

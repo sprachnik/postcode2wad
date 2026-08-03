@@ -20,7 +20,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from shapely.affinity import affine_transform
-from shapely.geometry import Polygon, box, shape
+from shapely.geometry import Point, Polygon, box, shape
+from shapely.ops import unary_union
 
 from . import UNITS_PER_METRE
 from .sources.lidar import Raster
@@ -127,6 +128,116 @@ def contour_bands(
     # Lowest first, so higher ground is laid over lower and wins the overlap.
     bands.sort(key=lambda b: b.elevation_m)
     return bands
+
+
+@dataclass(frozen=True)
+class Tree:
+    """One billboard: position in map units, canopy height in metres."""
+
+    x: float
+    y: float
+    height_m: float
+
+
+def vegetation(
+    dsm: Raster,
+    dtm: Raster,
+    tile: Tile,
+    exclude: list[Polygon] | None = None,
+    min_height_m: float = 3.0,
+    max_height_m: float = 28.0,
+    min_area_m2: float = 6.0,
+    per_tree_m2: float = 45.0,
+    max_trees: int = 900,
+) -> list[Tree]:
+    """Find tree canopy in the LIDAR and scatter billboards through it.
+
+    DSM minus DTM is height above bare earth. Anything tall that is *not* a
+    mapped building is, in this country and at this resolution, overwhelmingly a
+    tree — which makes the canopy essentially free, since both rasters are
+    already fetched to measure building heights.
+
+    Known false positives: LIDAR cannot tell a tree from an unmapped building,
+    a marquee or a lorry, and OSM building coverage is not complete. Footprints
+    are dilated before being subtracted because DSM edges bleed a pixel or two
+    past a wall, which would otherwise ring every house with saplings.
+
+    Woodland arrives as one large blob, so blobs are seeded with a tree per
+    `per_tree_m2` on a jittered grid rather than getting a single sprite at the
+    centroid.
+    """
+    from rasterio.features import shapes
+    from rasterio.transform import Affine
+
+    if dsm.values.shape != dtm.values.shape:
+        return []
+
+    delta = dsm.values - dtm.values
+    canopy = np.isfinite(delta) & (delta >= min_height_m) & (delta <= max_height_m)
+    if not canopy.any():
+        return []
+
+    transform = Affine(dsm.pixel_m, 0.0, dsm.min_e, 0.0, -dsm.pixel_m, dsm.max_n)
+    matrix = _osgb_to_map_matrix(tile)
+    square = box(0, 0, tile.size_units, tile.size_units)
+
+    blocked = unary_union(
+        [p.buffer(1.5 * UNITS_PER_METRE) for p in (exclude or [])]
+    ) if exclude else None
+
+    min_area_units = min_area_m2 * UNITS_PER_METRE * UNITS_PER_METRE
+    per_tree_units = per_tree_m2 * UNITS_PER_METRE * UNITS_PER_METRE
+
+    # Seeded on the tile, so the same tile always grows the same wood.
+    rng = np.random.default_rng((tile.ix * 73856093) ^ (tile.iy * 19349663))
+
+    trees: list[Tree] = []
+    for geom, value in shapes(canopy.astype("uint8"), mask=canopy, transform=transform):
+        if not value:
+            continue
+        poly = affine_transform(shape(geom), matrix)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        poly = poly.intersection(square)
+        if blocked is not None:
+            poly = poly.difference(blocked)
+        if poly.is_empty:
+            continue
+
+        for part in getattr(poly, "geoms", [poly]):
+            if not isinstance(part, Polygon) or part.area < min_area_units:
+                continue
+            height = object_height_m(dsm, dtm, tile, part)
+            if not (min_height_m <= height <= max_height_m):
+                continue
+            for x, y in _scatter(part, per_tree_units, rng):
+                trees.append(Tree(x=x, y=y, height_m=height))
+                if len(trees) >= max_trees:
+                    return trees
+    return trees
+
+
+def _scatter(polygon: Polygon, per_tree_units: float, rng) -> list[tuple[float, float]]:
+    """Points inside a polygon on a jittered grid, at least one per polygon."""
+    wanted = max(1, int(polygon.area // per_tree_units))
+    if wanted == 1:
+        point = polygon.representative_point()
+        return [(point.x, point.y)]
+
+    min_x, min_y, max_x, max_y = polygon.bounds
+    step = max(1.0, (polygon.area / wanted) ** 0.5)
+
+    points: list[tuple[float, float]] = []
+    for gx in np.arange(min_x, max_x, step):
+        for gy in np.arange(min_y, max_y, step):
+            jx = gx + rng.uniform(0.15, 0.85) * step
+            jy = gy + rng.uniform(0.15, 0.85) * step
+            if polygon.contains(Point(jx, jy)):
+                points.append((float(jx), float(jy)))
+    if not points:
+        point = polygon.representative_point()
+        return [(point.x, point.y)]
+    return points
 
 
 def ground_height_m(dtm: Raster, tile: Tile, polygon: Polygon) -> float:

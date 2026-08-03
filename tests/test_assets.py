@@ -11,6 +11,7 @@ Skipped when the Freedoom IWAD is not present, since tools/ is gitignored.
 
 from __future__ import annotations
 
+import io
 import re
 import struct
 import zipfile
@@ -137,3 +138,30 @@ def test_generated_map_references_only_existing_textures(tmp_path):
     }
     missing = sorted(used - iwad_lump_names() - shipped - SPECIAL)
     assert not missing, f"map references lumps that do not exist: {missing}"
+
+
+def test_tree_sprite_carries_bottom_centre_offsets():
+    """A Doom sprite hangs downward from its top offset.
+
+    With the default offsets Pillow writes (none at all, since grAb is not a
+    standard PNG chunk) the engine reads zero and draws the whole tree below the
+    floor. Nothing in the map format catches this — it just renders wrong.
+    """
+    png = art.tree_png(1)
+    index = png.find(b"grAb")
+    assert index != -1, "sprite has no grAb chunk"
+
+    x_offset, y_offset = struct.unpack_from(">ii", png, index + 4)
+    assert x_offset == art.TREE_PX // 2, "trunk must be centred on the thing"
+    assert y_offset == art.TREE_PX, "sprite must sit entirely above the actor's feet"
+
+
+def test_tree_png_still_decodes_with_the_extra_chunk():
+    """grAb is inserted by hand, so prove the file is still a valid PNG."""
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(art.tree_png(1)))
+    assert image.mode == "RGBA"
+    assert image.size == (art.TREE_PX, art.TREE_PX)
+    # A billboard with no transparency would render as an opaque square.
+    assert image.getchannel("A").getextrema()[0] == 0

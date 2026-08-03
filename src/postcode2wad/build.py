@@ -15,7 +15,7 @@ from pathlib import Path
 
 from shapely.geometry import Point, Polygon
 
-from . import UNITS_PER_METRE, textures
+from . import UNITS_PER_METRE, art, textures
 from .features import (
     barriers_to_shapes,
     buildings_to_shapes,
@@ -28,7 +28,7 @@ from .features import (
 from .geometry import MapGeometry, SectorSpec, Thing, build_geometry
 from .sources import lidar, overpass
 from .sources.postcodes import Place
-from .terrain import contour_bands, ground_height_m, object_height_m
+from .terrain import contour_bands, ground_height_m, object_height_m, vegetation
 from .tiles import Tile
 
 #: Headroom above the highest ground before the sky plane.
@@ -72,6 +72,7 @@ class BuildStats:
     sea: int = 0
     landuse: int = 0
     barriers: int = 0
+    trees: int = 0
     terrain_bands: int = 0
     sectors: int = 0
     linedefs: int = 0
@@ -83,7 +84,7 @@ class BuildStats:
         return (
             f"{self.buildings} buildings, {self.roads} road pieces, "
             f"{self.water} water, {self.sea} sea, {self.landuse} land parcels, "
-            f"{self.barriers} barriers, "
+            f"{self.barriers} barriers, {self.trees} trees, "
             f"{self.terrain_bands} terrain bands, terrain {low:.1f}-{high:.1f}m\n"
             f"{self.sectors} sectors, {self.linedefs} linedefs"
         )
@@ -180,6 +181,7 @@ def build_tile(
     with_water: bool = True,
     with_landuse: bool = True,
     with_barriers: bool = True,
+    with_trees: bool = True,
 ) -> BuiltMap:
     tile = Tile.containing(place.easting, place.northing, size_m)
     stats = BuildStats()
@@ -353,8 +355,21 @@ def build_tile(
         )
         stats.buildings += 1
 
-    start = _player_start(place, tile, [s.polygon for s in building_shapes], tile.size_units)
-    geometry = build_geometry(specs, things=[start])
+    things = [_player_start(place, tile, [s.polygon for s in building_shapes], tile.size_units)]
+
+    if with_trees and dsm is not None and dtm is not None:
+        for tree in vegetation(dsm, dtm, tile, exclude=[s.polygon for s in building_shapes]):
+            things.append(
+                Thing(
+                    x=round(tree.x),
+                    y=round(tree.y),
+                    type=art.TREE_DOOMEDNUM,
+                    scale=round(tree.height_m / art.TREE_HEIGHT_M, 3),
+                )
+            )
+            stats.trees += 1
+
+    geometry = build_geometry(specs, things=things)
 
     stats.sectors = len(geometry.sectors)
     stats.linedefs = len(geometry.linedefs)

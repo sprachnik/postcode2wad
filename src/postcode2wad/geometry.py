@@ -65,6 +65,9 @@ class Thing:
     y: int
     type: int
     angle: int = 0
+    #: Sprite scale. UDMF lets each thing carry its own, which is what allows a
+    #: single tree actor to stand in for canopy from 3m to 25m tall.
+    scale: float = 1.0
 
 
 @dataclass

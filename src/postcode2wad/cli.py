@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-roads", action="store_true", help="skip roads and paths")
     parser.add_argument("--no-water", action="store_true", help="skip water bodies")
+    parser.add_argument("--no-trees", action="store_true", help="skip tree sprites")
     parser.add_argument(
         "--no-barriers", action="store_true", help="skip hedges, fences and garden walls"
     )
@@ -128,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             with_water=not args.no_water,
             with_landuse=not args.no_landuse,
             with_barriers=not args.no_barriers,
+            with_trees=not args.no_trees,
         )
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
