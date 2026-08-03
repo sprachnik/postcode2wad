@@ -27,11 +27,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from shapely.geometry import Point  # noqa: E402
+from shapely.geometry import Point
 
-import postcode2wad.build as build_module  # noqa: E402
-from postcode2wad import geometry as geometry_module  # noqa: E402
-from postcode2wad.sources import postcodes  # noqa: E402
+import postcode2wad.build as build_module
+from postcode2wad import geometry as geometry_module
+from postcode2wad.sources import postcodes
 
 #: Player fits through nothing shorter than this (2 * radius 16, plus play).
 MIN_GAP_UNITS = 33
