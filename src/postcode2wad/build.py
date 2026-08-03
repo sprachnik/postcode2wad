@@ -19,6 +19,7 @@ from shapely.ops import nearest_points
 from . import UNITS_PER_METRE, art, textures
 from .features import (
     barriers_to_shapes,
+    beach_from_coastline,
     buildings_to_shapes,
     landuse_to_shapes,
     roads_to_shapes,
@@ -43,6 +44,13 @@ WATER_DEPTH_UNITS = 20
 #: mean sea level at Newlyn — so no measurement is needed and every coastal tile
 #: in the country agrees on it for free.
 SEA_LEVEL_M = 0.0
+
+#: The foreshore. 30m of sand landward of the coastline, kept to ground below
+#: BEACH_TOP_M so it stops at the foot of a cliff instead of climbing it — at
+#: Birchington the coast is chalk, and sand running up the cliff face would be
+#: worse than no beach at all.
+BEACH_WIDTH_M = 30.0
+BEACH_TOP_M = 6.0
 
 #: How far the sea surface sits below the datum. Exactly one Doom step: a Doom
 #: player can climb 24 units and no more, so at 24 you can wade off a beach and
@@ -71,6 +79,7 @@ class BuildStats:
     roads: int = 0
     water: int = 0
     sea: int = 0
+    beach: int = 0
     landuse: int = 0
     barriers: int = 0
     trees: int = 0
@@ -84,7 +93,8 @@ class BuildStats:
         low, high = self.elevation_range_m
         return (
             f"{self.buildings} buildings, {self.roads} road pieces, "
-            f"{self.water} water, {self.sea} sea, {self.landuse} land parcels, "
+            f"{self.water} water, {self.sea} sea, {self.beach} beach, "
+            f"{self.landuse} land parcels, "
             f"{self.barriers} barriers, {self.trees} trees, "
             f"{self.terrain_bands} terrain bands, terrain {low:.1f}-{high:.1f}m\n"
             f"{self.sectors} sectors, {self.linedefs} linedefs"
@@ -319,6 +329,24 @@ def build_tile(
                 )
             )
             stats.sea += 1
+
+        # Beach after the sea so the sand sits on the land side of the line,
+        # before roads and buildings so a seafront promenade still wins.
+        for shape in beach_from_coastline(features.coastline, tile, BEACH_WIDTH_M):
+            for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
+                if elevation_m > BEACH_TOP_M:
+                    continue
+                specs.append(
+                    SectorSpec(
+                        polygon=piece,
+                        floor=round(elevation_m * UNITS_PER_METRE),
+                        ceiling=sky_height,
+                        floor_tex=textures.SAND,
+                        wall_tex=textures.SAND,
+                        light=DAYLIGHT,
+                    )
+                )
+            stats.beach += 1
 
         for shape in water_to_shapes(features.water, tile):
             level = round(terrain_at(shape.polygon) * UNITS_PER_METRE)

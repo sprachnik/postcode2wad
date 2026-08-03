@@ -263,6 +263,64 @@ def _leftward(line: LineString, point: Point) -> float:
     return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
 
 
+def coastline_lines(features: list[Feature], tile: Tile) -> list[LineString]:
+    """Coastline fragments clipped to the tile, in map units."""
+    clip = tile_clip(tile)
+    lines: list[LineString] = []
+    for feature in features:
+        line = _map_line(feature, tile)
+        if line is None:
+            continue
+        part = line.intersection(clip)
+        if part.is_empty:
+            continue
+        for geom in getattr(part, "geoms", [part]):
+            if isinstance(geom, LineString) and geom.length > 0:
+                lines.append(geom)
+    return lines
+
+
+def beach_from_coastline(
+    features: list[Feature],
+    tile: Tile,
+    width_m: float = 30.0,
+    simplify_m: float = 1.0,
+) -> list[Shape]:
+    """A sand strip on the landward side of the coastline.
+
+    OSM does tag beaches as `natural=beach` areas, and those are now fetched and
+    handled like any other land cover — but coverage is patchy, and the
+    Birchington seafront has none, so a coastal tile still came out as grass
+    running straight into the sea.
+
+    Generating the strip instead means every coastal tile gets a shoreline.
+    It is deliberately *not* clipped to low ground here: the caller intersects
+    it with the contour bands it wants, which is also what keeps the sand
+    stepping with the terrain instead of ironing the foreshore flat.
+    """
+    clip = tile_clip(tile)
+    lines = coastline_lines(features, tile)
+    if not lines:
+        return []
+
+    strip = unary_union(
+        [line.buffer(width_m * UNITS_PER_METRE, cap_style=2) for line in lines]
+    )
+    # Keep the land half only. The sea already has its own flat, and sand laid
+    # over it would float on the surface.
+    sea = unary_union([shape.polygon for shape in sea_from_coastline(features, tile)])
+    if not sea.is_empty:
+        strip = strip.difference(sea)
+    if strip.is_empty:
+        return []
+
+    simplify_units = simplify_m * UNITS_PER_METRE
+    return [
+        Shape(polygon=part, tags={"natural": "beach"})
+        for part in _clean(strip, clip, simplify_units)
+    ]
+
+
 def sea_from_coastline(
     features: list[Feature],
     tile: Tile,
@@ -287,19 +345,7 @@ def sea_from_coastline(
     the tile, which this does not fetch.
     """
     clip = tile_clip(tile)
-
-    lines: list[LineString] = []
-    for feature in features:
-        line = _map_line(feature, tile)
-        if line is None:
-            continue
-        part = line.intersection(clip)
-        if part.is_empty:
-            continue
-        for geom in getattr(part, "geoms", [part]):
-            if isinstance(geom, LineString) and geom.length > 0:
-                lines.append(geom)
-
+    lines = coastline_lines(features, tile)
     if not lines:
         return []
 

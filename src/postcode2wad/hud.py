@@ -273,7 +273,16 @@ class PostcodeHUD : StaticEventHandler
 
     // ---- overlay --------------------------------------------------------
 
+    ui void DrawBox(int x, int y, int size, Color col)
+    {{
+        Screen.DrawLine(x, y, x + size, y, col);
+        Screen.DrawLine(x, y + size, x + size, y + size, col);
+        Screen.DrawLine(x, y, x, y + size, col);
+        Screen.DrawLine(x + size, y, x + size, y + size, col);
+    }}
+
     // A ring, as a coarse polygon. The overlay API has no circle primitive.
+    // Only the compass is round now; the minimap is square.
     ui void DrawRing(double cx, double cy, double radius, Color col, int steps)
     {{
         double prevx = cx + radius, prevy = cy;
@@ -360,15 +369,14 @@ class PostcodeHUD : StaticEventHandler
         int px = MARGIN;
         int py = MARGIN;
         double cx = px + panel * 0.5;
-        double cy = py + panel * 0.5;
-        double radius = panel * 0.5;
 
-        // The disc is masked into the texture's alpha, so this draws round.
         Screen.DrawTexture(minimap, false, px, py,
             DTA_DestWidth, panel, DTA_DestHeight, panel,
             DTA_Alpha, 0.86);
-        DrawRing(cx, cy, radius - 1, Color(220, 16, 18, 22), 48);
-        DrawRing(cx, cy, radius - 2, Color(150, 210, 214, 220), 48);
+        // Square, matching the tile. A round minimap crops the tile corners, and
+        // a player standing in one would have no marker at all.
+        DrawBox(px, py, panel, Color(220, 16, 18, 22));
+        DrawBox(px + 1, py + 1, panel - 2, Color(150, 210, 214, 220));
 
         // Where we are, as a fraction of the tile. The minimap is north-up and
         // covers the tile exactly, so this is a straight scale.

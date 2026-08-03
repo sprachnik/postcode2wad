@@ -42,9 +42,12 @@ TILE_SELECTORS = [
     'way["building"]',
     'relation["building"]',
     'way["highway"]',
-    'way["natural"="water"]',
-    'relation["natural"="water"]',
-    'way["natural"="coastline"]',
+    # Whole `natural` key, not just water and coastline. Eight land covers --
+    # beach, sand, wood, scrub, heath, grassland, shingle, bare_rock -- were
+    # sitting in the land-cover table with no way of ever being fetched, which
+    # is why a coastal tile had no beach on it.
+    'way["natural"]',
+    'relation["natural"]',
     'way["waterway"="riverbank"]',
     'way["barrier"]',
     'way["landuse"]',
@@ -144,7 +147,9 @@ def fetch_tile(
         elif tags.get("natural") == "water" or tags.get("waterway") == "riverbank":
             if feature.closed:
                 out.water.append(feature)
-        elif ("landuse" in tags or "leisure" in tags) and feature.closed:
+        elif ("landuse" in tags or "leisure" in tags or "natural" in tags) and feature.closed:
+            # `closed` matters here: plenty of natural features are open ways
+            # (cliff, tree_row, ridge) and would be nonsense as filled areas.
             out.landuse.append(feature)
 
     return out

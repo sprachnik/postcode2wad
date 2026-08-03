@@ -55,15 +55,16 @@ def render_minimap(
     size_px: int = 256,
     roof_texture: str = "CEIL5_2",
 ) -> bytes:
-    """A north-up plan of the tile as a disc, as RGBA PNG bytes for the HUD.
+    """A north-up plan of the tile, as PNG bytes for the HUD.
 
     Deliberately *baked* rather than drawn at runtime. Reconstructing this from
     map geometry in ZScript would mean walking 14,000 linedefs every frame, and
     we already know the plan at generation time.
 
-    The circle is masked into the alpha channel rather than drawn by the HUD,
-    because the overlay API has no clip region — ZScript can draw a ring on top
-    of a square texture but it cannot cut the corners off one.
+    Square, not round. A disc looks better but the tile *is* a square, so
+    masking it to a circle throws away the corners — and a player standing in
+    one then has no marker on the map at all, which is exactly when you most
+    want to know where you are.
     """
     from PIL import Image, ImageDraw
 
@@ -88,18 +89,6 @@ def render_minimap(
             continue
         if len(ring) >= 3:
             draw.polygon(ring, fill=colour)
-
-    # Supersample the mask and shrink it back down, so the rim is smooth rather
-    # than a staircase — at 256px an aliased circle is very obvious.
-    factor = 4
-    mask = Image.new("L", (size_px * factor, size_px * factor), 0)
-    ImageDraw.Draw(mask).ellipse(
-        [0, 0, size_px * factor - 1, size_px * factor - 1], fill=255
-    )
-    mask = mask.resize((size_px, size_px), Image.LANCZOS)
-
-    image = image.convert("RGBA")
-    image.putalpha(mask)
 
     from io import BytesIO
 
