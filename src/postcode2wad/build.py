@@ -167,7 +167,8 @@ def _best_facing(x: float, y: float, blocked: list[Polygon], size_units: int) ->
 
 
 def _player_start(
-    place: Place,
+    easting: float,
+    northing: float,
     tile: Tile,
     blocked: list[Polygon],
     size_units: int,
@@ -182,7 +183,7 @@ def _player_start(
     by construction, and "you appear on the street outside" is what someone
     typing their own postcode expects anyway.
     """
-    x, y = tile.to_map(place.easting, place.northing)
+    x, y = tile.to_map(easting, northing)
     if not (0 <= x <= size_units and 0 <= y <= size_units):
         # A region pack builds tiles the postcode is nowhere near. Clamping
         # would jam every one of those starts into the corner nearest the
@@ -246,6 +247,7 @@ def build_tile(
     with_slopes: bool = True,
     tile: Tile | None = None,
     features: overpass.TileFeatures | None = None,
+    spawn: tuple[float, float] | None = None,
 ) -> BuiltMap:
     # Sloped ground is not bound by Doom's 24-unit climb limit, so the contour
     # step can be four times coarser — which is where the sector saving comes
@@ -505,8 +507,19 @@ def build_tile(
     # Barriers block too: spawning nose-first into a hedge is no better than
     # spawning into a wall.
     obstacles = [s.polygon for s in building_shapes] + barrier_polygons
+    # An explicit spawn is exact: whoever typed coordinates meant *there*, so
+    # skip the snap-to-nearest-road that the postcode default gets. The
+    # clear-of-obstacles spiral still applies either way.
+    spawn_e, spawn_n = spawn if spawn is not None else (place.easting, place.northing)
     things = [
-        _player_start(place, tile, obstacles, tile.size_units, roads=road_polygons)
+        _player_start(
+            spawn_e,
+            spawn_n,
+            tile,
+            obstacles,
+            tile.size_units,
+            roads=None if spawn is not None else road_polygons,
+        )
     ]
 
     if with_trees and dsm is not None and dtm is not None:

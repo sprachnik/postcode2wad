@@ -223,15 +223,96 @@ class PostcodeHUD : StaticEventHandler
         return -1;   // outside the generated block
     }}
 
+    // ---- telemetry --------------------------------------------------------
+    //
+    // The engine cannot phone home, but Console.Printf lands in the file that
+    // "+logfile" names, so structured one-liners there are a telemetry channel
+    // anything outside the process can tail. Three record types:
+    //
+    //   P2W TLM    position, lat/lng, heading, movement intent, actual speed
+    //   P2W STUCK  a full second of held movement keys with no displacement --
+    //              the literal definition of "I'm pushing forward and nothing
+    //              is happening", fired automatically so the player does not
+    //              have to notice, stop, and report it
+    //   P2W MARK   manual beacon: type "netevent mark" in the console
+    //
+    // Intent vs outcome is the whole trick: cmd.forwardmove/sidemove say what
+    // the player is TRYING to do, vel says what the world let them do.
+
+    int tlmTick;
+    int stuckTicks;
+
+    String FmtLatLng(double x, double y)
+    {{
+        int here = TileIndexFor(level.MapName);
+        if (here < 0) return "lat=? lng=?";
+        double lat = TILE_LAT0[here] + LAT_PER_X * x + LAT_PER_Y * y;
+        double lon = TILE_LON0[here] + LON_PER_X * x + LON_PER_Y * y;
+        return String.Format("lat=%.6f lng=%.6f", lat, lon);
+    }}
+
+    void TelemetryTick(PlayerInfo p)
+    {{
+        int fwd = p.cmd.forwardmove;
+        int side = p.cmd.sidemove;
+        double spd = p.mo.vel.xy.Length();
+        bool pushing = (fwd != 0 || side != 0);
+
+        if (pushing && spd < 0.5 && p.mo.health > 0)
+        {{
+            stuckTicks++;
+        }}
+        else if (stuckTicks < 0)
+        {{
+            stuckTicks++;   // cooling down after a report
+        }}
+        else
+        {{
+            stuckTicks = 0;
+        }}
+
+        if (stuckTicks == 35)
+        {{
+            Console.Printf("P2W STUCK map=%s x=%.0f y=%.0f %s ang=%.0f fwd=%d side=%d",
+                level.MapName, p.mo.pos.x, p.mo.pos.y,
+                FmtLatLng(p.mo.pos.x, p.mo.pos.y), p.mo.angle, fwd, side);
+            stuckTicks = -105;   // three seconds before it can fire again
+        }}
+
+        // A breadcrumb roughly three times a second, and only while moving or
+        // trying to -- an idle player should leave an idle log.
+        tlmTick++;
+        if (tlmTick % 10 != 0) return;
+        if (!pushing && spd < 0.5) return;
+        Console.Printf("P2W TLM map=%s x=%.0f y=%.0f z=%.0f %s ang=%.0f fwd=%d side=%d spd=%.1f",
+            level.MapName, p.mo.pos.x, p.mo.pos.y, p.mo.pos.z,
+            FmtLatLng(p.mo.pos.x, p.mo.pos.y), p.mo.angle, fwd, side, spd);
+    }}
+
+    override void NetworkProcess(ConsoleEvent e)
+    {{
+        if (!(e.Name ~== "mark")) return;
+        PlayerInfo p = players[consoleplayer];
+        if (p == null || p.mo == null) return;
+        Console.Printf("P2W MARK map=%s x=%.0f y=%.0f %s",
+            level.MapName, p.mo.pos.x, p.mo.pos.y,
+            FmtLatLng(p.mo.pos.x, p.mo.pos.y));
+    }}
+
     // ---- edge transitions -----------------------------------------------
 
     override void WorldTick()
     {{
+        PlayerInfo p = players[consoleplayer];
+        if (p == null || p.mo == null) return;
+
+        // Telemetry before any early-out: it must keep reporting exactly when
+        // movement is broken, which is when everything else here bails.
+        TelemetryTick(p);
+
+        if (p.mo.health <= 0) return;
         if (cooldown > 0) {{ cooldown--; return; }}
         if (TILE_COUNT < 2) return;
-
-        PlayerInfo p = players[consoleplayer];
-        if (p == null || p.mo == null || p.mo.health <= 0) return;
 
         int here = TileIndexFor(level.MapName);
         if (here < 0) return;

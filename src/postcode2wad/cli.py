@@ -46,6 +46,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-water", action="store_true", help="skip water bodies")
     parser.add_argument("--no-trees", action="store_true", help="skip tree sprites")
     parser.add_argument(
+        "--spawn",
+        metavar="LAT,LNG",
+        help=(
+            "spawn the player exactly here instead of at the postcode "
+            "(e.g. --spawn 51.377,1.302; in a region the tile containing the "
+            "point gets it, the rest keep their defaults)"
+        ),
+    )
+    parser.add_argument(
         "--no-slopes",
         action="store_true",
         help=(
@@ -211,6 +220,16 @@ def main(argv: list[str] | None = None) -> int:
         f"{place.label}  ({place.lat:.5f}, {place.lon:.5f})  OSGB {place.easting:.0f}E {place.northing:.0f}N"
     )
 
+    spawn = None
+    if args.spawn:
+        try:
+            spawn_lat, spawn_lng = (float(v) for v in args.spawn.split(","))
+        except ValueError:
+            parser.error("--spawn wants LAT,LNG, e.g. --spawn 51.377,1.302")
+        from .tiles import lonlat_to_osgb
+
+        spawn = lonlat_to_osgb(spawn_lng, spawn_lat)
+
     tile_options = {
         "contour_step_m": args.contour_step,
         "with_terrain": not args.no_terrain,
@@ -220,6 +239,9 @@ def main(argv: list[str] | None = None) -> int:
         "with_barriers": not args.no_barriers,
         "with_trees": not args.no_trees,
         "with_slopes": not args.no_slopes,
+        # In a region every tile receives this; only the tile actually
+        # containing the point uses it, the rest fall back to their default.
+        "spawn": spawn,
     }
 
     if args.region > 0:
@@ -231,14 +253,7 @@ def main(argv: list[str] | None = None) -> int:
             size_m=args.size,
             cache_dir=cache_dir,
             refresh=args.refresh,
-            contour_step_m=args.contour_step,
-            with_slopes=not args.no_slopes,
-            with_terrain=not args.no_terrain,
-            with_roads=not args.no_roads,
-            with_water=not args.no_water,
-            with_landuse=not args.no_landuse,
-            with_barriers=not args.no_barriers,
-            with_trees=not args.no_trees,
+            **tile_options,
         )
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
