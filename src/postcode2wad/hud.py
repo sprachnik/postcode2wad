@@ -194,8 +194,16 @@ class PostcodeHUD : StaticEventHandler
     clearscope int TileIndexFor(String mapname)
     {{
         // "{prefix}0007" -> 6. Nothing else in the pack is named this way.
+        //
+        // Base 10 explicitly. ToInt() defaults to auto-detecting the base like
+        // strtol, so a leading zero means octal -- and "08" and "09" are not
+        // valid octal, so they came back as 0 and the range check below
+        // rejected them. MAP08 and MAP09 lost the entire HUD and could not
+        // work out which tile they were, so their edge transitions were dead
+        // too. MAP01-MAP07 were fine, which is what made it look like a
+        // transition bug rather than a parsing one.
         if (mapname.Length() != {name_len}) return -1;
-        int n = mapname.Mid({prefix_len}, {digits}).ToInt();
+        int n = mapname.Mid({prefix_len}, {digits}).ToInt(10);
         if (n < 1 || n > TILE_COUNT) return -1;
         return n - 1;
     }}
