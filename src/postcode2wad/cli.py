@@ -45,6 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-water", action="store_true", help="skip water bodies")
     parser.add_argument("--no-trees", action="store_true", help="skip tree sprites")
     parser.add_argument(
+        "--no-hud", action="store_true", help="skip the minimap, compass and coordinate HUD"
+    )
+    parser.add_argument(
         "--no-barriers", action="store_true", help="skip hedges, fences and garden walls"
     )
     parser.add_argument(
@@ -150,11 +153,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     from .pk3 import FOG_DENSITY
 
+    extra: dict[str, bytes] = {}
+    handler: str | None = None
+    if not args.no_hud:
+        from .hud import HANDLER, MINIMAP, ZSCRIPT_LUMP, build_zscript
+        from .preview import render_minimap
+
+        extra[f"graphics/{MINIMAP}.png"] = render_minimap(
+            built.geometry, tile_units=built.tile.size_units
+        )
+        extra[ZSCRIPT_LUMP] = build_zscript(built.tile, built.place.label).encode()
+        handler = HANDLER
+
     out = write_pk3(
         args.out,
         textmap,
         title=built.title,
         fog_density=FOG_DENSITY if args.fog is None else args.fog,
+        extra_files=extra,
+        event_handler=handler,
     )
     print(f"wrote {out}")
 

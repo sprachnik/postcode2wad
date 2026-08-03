@@ -60,3 +60,36 @@ def test_reversing_the_way_swaps_land_and_sea():
 def test_no_coastline_means_no_sea():
     """An inland tile must not sprout an ocean."""
     assert sea_from_coastline([], TILE) == []
+
+
+def test_hud_georeference_matches_a_real_transform():
+    """The HUD's linear fit must agree with pyproj across the whole tile.
+
+    The HUD cannot run OSTN15 — that is a 1.5 MB shift grid — so it carries a
+    plane fitted to the true transform instead. If that plane is wrong the
+    readout is confidently, silently wrong, which is worse than absent.
+    """
+    from postcode2wad import UNITS_PER_METRE
+    from postcode2wad.hud import georeference
+    from postcode2wad.tiles import osgb_to_lonlat
+
+    geo = georeference(TILE)
+    east, north = TILE.origin
+
+    worst = 0.0
+    for fx in (0.0, 0.25, 0.5, 0.75, 1.0):
+        for fy in (0.0, 0.25, 0.5, 0.75, 1.0):
+            x = fx * TILE.size_units
+            y = fy * TILE.size_units
+            lat = geo["lat0"] + geo["lat_per_x"] * x + geo["lat_per_y"] * y
+            lon = geo["lon0"] + geo["lon_per_x"] * x + geo["lon_per_y"] * y
+
+            true_lon, true_lat = osgb_to_lonlat(
+                east + x / UNITS_PER_METRE, north + y / UNITS_PER_METRE
+            )
+            # Degrees to metres, near enough at this latitude.
+            dy = (lat - true_lat) * 111_320.0
+            dx = (lon - true_lon) * 111_320.0 * 0.62
+            worst = max(worst, (dx * dx + dy * dy) ** 0.5)
+
+    assert worst < 0.5, f"linear georeference is off by {worst:.2f}m"

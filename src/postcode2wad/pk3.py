@@ -39,8 +39,19 @@ LIGHT_MODE = 1
 #: "-" is MAPINFO for silence.
 DEFAULT_MUSIC = "-"
 
+#: A StaticEventHandler is *not* instantiated just by existing in ZSCRIPT — it
+#: has to be registered here. Miss this and the HUD compiles cleanly, loads
+#: without a warning, and simply never draws.
+EVENT_HANDLER_TEMPLATE = """\
+GameInfo
+{{
+    AddEventHandlers = "{handler}"
+}}
+
+"""
+
 MAPINFO_TEMPLATE = """\
-map {map_name} "{title}"
+{handlers}map {map_name} "{title}"
 {{
     sky1 = "{sky}"
     music = "{music}"
@@ -64,8 +75,12 @@ def build_mapinfo(
     sky: str = art.SKY,
     music: str = DEFAULT_MUSIC,
     fog_density: int = FOG_DENSITY,
+    event_handler: str | None = None,
 ) -> str:
     return MAPINFO_TEMPLATE.format(
+        handlers=(
+            EVENT_HANDLER_TEMPLATE.format(handler=event_handler) if event_handler else ""
+        ),
         map_name=map_name,
         title=title,
         sky=sky,
@@ -86,6 +101,7 @@ def write_pk3(
     extra_files: dict[str, bytes] | None = None,
     art_seed: int | None = 1,
     fog_density: int = FOG_DENSITY,
+    event_handler: str | None = None,
 ) -> Path:
     """Write the PK3. `art_seed=None` skips generated art (and its Pillow cost)."""
     path = Path(path)
@@ -98,7 +114,12 @@ def write_pk3(
 
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as pk3:
         pk3.writestr(f"maps/{map_name}.wad", build_map_wad(textmap, map_name))
-        pk3.writestr("MAPINFO", build_mapinfo(map_name, title, sky, fog_density=fog_density))
+        pk3.writestr(
+            "MAPINFO",
+            build_mapinfo(
+                map_name, title, sky, fog_density=fog_density, event_handler=event_handler
+            ),
+        )
         for name, data in files.items():
             pk3.writestr(name, data)
 

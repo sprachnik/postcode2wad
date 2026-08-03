@@ -29,6 +29,85 @@ def _shade(fraction: float) -> tuple[int, int, int]:
     return r, g, b
 
 
+#: Minimap palette. Colour comes from the floor *texture*, not the floor height:
+#: on a plan view the thing you navigate by is the road network, and a
+#: hypsometric ramp buries it in the terrain it happens to sit level with.
+MINIMAP_BACKGROUND = (26, 34, 28)
+MINIMAP_COLOURS = {
+    "DMTARMAC": (150, 152, 158),
+    "DMPAVE": (120, 122, 128),
+    "DMCONC": (120, 122, 128),
+    "DMGRAVEL": (112, 106, 96),
+    "DMWATER": (58, 92, 132),
+    "DMFARM": (86, 68, 48),
+    "DMSAND": (150, 138, 106),
+    "DMWOOD": (34, 52, 32),
+    "DMSCRUB": (58, 64, 42),
+    "DMMEADOW": (72, 84, 44),
+    "DMGARDEN": (44, 68, 36),
+}
+MINIMAP_BUILDING = (228, 196, 140)
+
+
+def render_minimap(
+    geo: MapGeometry,
+    tile_units: int,
+    size_px: int = 256,
+    roof_texture: str = "CEIL5_2",
+) -> bytes:
+    """A north-up plan of the tile as a disc, as RGBA PNG bytes for the HUD.
+
+    Deliberately *baked* rather than drawn at runtime. Reconstructing this from
+    map geometry in ZScript would mean walking 14,000 linedefs every frame, and
+    we already know the plan at generation time.
+
+    The circle is masked into the alpha channel rather than drawn by the HUD,
+    because the overlay API has no clip region — ZScript can draw a ring on top
+    of a square texture but it cannot cut the corners off one.
+    """
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (size_px, size_px), MINIMAP_BACKGROUND)
+    draw = ImageDraw.Draw(image)
+    scale = size_px / float(tile_units)
+
+    def project(x: float, y: float) -> tuple[float, float]:
+        # Doom's +y is north; image +y is down.
+        return x * scale, size_px - y * scale
+
+    for face, sector in zip(geo.faces, geo.sectors, strict=False):
+        floor_tex = sector.get("texturefloor", "")
+        colour = (
+            MINIMAP_BUILDING
+            if floor_tex == roof_texture
+            else MINIMAP_COLOURS.get(floor_tex, MINIMAP_COLOURS["DMGARDEN"])
+        )
+        try:
+            ring = [project(x, y) for x, y in face.exterior.coords]
+        except AttributeError:
+            continue
+        if len(ring) >= 3:
+            draw.polygon(ring, fill=colour)
+
+    # Supersample the mask and shrink it back down, so the rim is smooth rather
+    # than a staircase — at 256px an aliased circle is very obvious.
+    factor = 4
+    mask = Image.new("L", (size_px * factor, size_px * factor), 0)
+    ImageDraw.Draw(mask).ellipse(
+        [0, 0, size_px * factor - 1, size_px * factor - 1], fill=255
+    )
+    mask = mask.resize((size_px, size_px), Image.LANCZOS)
+
+    image = image.convert("RGBA")
+    image.putalpha(mask)
+
+    from io import BytesIO
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
 def render(
     geo: MapGeometry,
     path: str | Path,
