@@ -111,18 +111,47 @@ def test_the_ground_is_actually_sloped(tile):
     )
 
 
-def test_no_plane_is_a_shard(tile):
-    """Near-vertical planes render as spikes into the sky."""
-    steep = []
-    for s in tile.sectors:
-        if "floorplane_a" not in s:
+def test_no_spires_between_ground_sectors(tile):
+    """Two patches of ground that touch must meet at the same height.
+
+    The reported symptom was "rectangles of grass going right up into the sky":
+    a thin face whose plane disagreed with its neighbour's along the edge they
+    share, leaving a tall, paper-thin wall standing in the open.
+
+    Steepness was the first thing measured here and it is the wrong signal --
+    a steep plane that meets its neighbours exactly is a bank, and banks are
+    correct. What matters is the disagreement at the join, so that is what this
+    measures: sampled along every edge between two sloped ground sectors,
+    end to end. It should be exactly zero, because both planes are fitted
+    through the same two rounded corners.
+
+    Only ground-to-ground joins count. A hedge or fence top against the grass
+    beside it is legitimately 1.8m proud, and including those hid the real
+    number behind a crowd of correct ones for some time.
+    """
+    walls = []
+    for line in tile.linedefs:
+        if "sideback" not in line:
             continue
-        gradient = math.hypot(s["floorplane_a"], s["floorplane_b"]) / abs(s["floorplane_c"])
-        if gradient > 1.0:
-            steep.append(gradient)
-    # A handful of large faces legitimately keep a steep fit; a rash of them
-    # means the salvage rule has broken.
-    assert len(steep) < 40, f"{len(steep)} planes steeper than 45 degrees"
+        a = tile.sidedefs[line["sidefront"]]["sector"]
+        b = tile.sidedefs[line["sideback"]]["sector"]
+        if a == b:
+            continue
+        sa, sb = tile.sectors[a], tile.sectors[b]
+        if "floorplane_a" not in sa or "floorplane_a" not in sb:
+            continue
+        v1, v2 = tile.vertices[line["v1"]], tile.vertices[line["v2"]]
+        for t in (0.0, 0.5, 1.0):
+            x = v1[0] + t * (v2[0] - v1[0])
+            y = v1[1] + t * (v2[1] - v1[1])
+            walls.append(abs(floor_z(sa, x, y) - floor_z(sb, x, y)))
+
+    assert walls, "no ground-to-ground joins found at all"
+    tall = [w for w in walls if w > MAX_STEP]
+    assert not tall, (
+        f"{len(tall)} of {len(walls)} ground joins step more than the player can "
+        f"climb, the worst by {max(tall) / 32:.2f} m — that is a spire"
+    )
 
 
 def test_no_interior_one_sided_lines(tile):

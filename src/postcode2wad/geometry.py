@@ -24,13 +24,12 @@ linedef v1=q, v2=p, and the face becomes its front sector.
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 
 from shapely.geometry import LineString, Polygon
 from shapely.geometry.polygon import orient
 from shapely.ops import polygonize, unary_union
-
-from . import UNITS_PER_METRE
 
 SKY_FLAT = "F_SKY1"
 
@@ -200,7 +199,7 @@ def build_geometry(
                 edges.setdefault(key, []).append((face_idx, a, b))
 
     face_spec = _absorb_slivers(owned, edges, min_sliver_width)
-    face_plane = _floor_planes(owned, face_spec, edges, height_at, min_sliver_width)
+    face_plane = _floor_planes(owned, face_spec, edges, height_at)
 
     geo = MapGeometry()
     verts = _VertexTable()
@@ -449,6 +448,38 @@ def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] 
     # ground went 0.41% -> 2.14% with the cap in. A steep plane is walked
     # correctly, or slid down, which is what a bank should do.
     d = -(a * x1 + b * y1 + c * z1)
+
+    # Does the plane actually pass through the corners it was fitted to?
+    #
+    # In exact arithmetic that is a tautology, which is why it went unchecked
+    # for a long time. In doubles it is not: constrained triangulation produces
+    # needles, and the worst here was 1 unit wide by 310 long. Two edges that
+    # nearly parallel cancel almost entirely in the cross product, so the
+    # normal is mostly rounding error, and the plane -- anchored exactly at
+    # corner one -- missed corner three by 2.64 metres.
+    #
+    # That is invisible as a slope and unmistakable in game: the needle's
+    # neighbour fits its own corners correctly, so the two disagree along the
+    # 310-unit edge they share, and the join renders as a grass-textured blade
+    # nine metres long standing in the sky.
+    #
+    # Failing the check returns None, and the caller hands the face its
+    # neighbour's plane across its longest edge, which is exactly the edge that
+    # would otherwise have grown the blade.
+    for x, y, z in ((x1, y1, z1), (x2, y2, z2), (x3, y3, z3)):
+        if abs((-(a * x + b * y + d) / c) - z) > 1.0:  # 1 unit = 3cm
+            return None
+
+    # A fit can be self-consistent and still be nonsense: one survivor across
+    # nine tiles had a gradient of 100 -- 89 degrees -- through corners it
+    # agreed with to the unit, and its 10cm-long join with a flat neighbour
+    # stands up as a 10cm-wide, 10m-tall blade.
+    #
+    # Rejecting those was tried and is *much* worse, because rejection is
+    # contagious: the face takes a neighbour's plane, which then misses its own
+    # other corners, and those joins step in turn. Across the nine tiles the
+    # worst ground step went from 9.9m on one 10cm edge to 19.8m on ordinary
+    # ones. One blade is the better state, and it is logged in TODO.md.
     return (a, b, c, d)
 
 
@@ -462,16 +493,6 @@ def _width(polygon: Polygon) -> float:
     return 2.0 * polygon.area / polygon.length
 
 
-#: Faces smaller than this are arrangement artefacts -- two boundaries nearly
-#: touching -- rather than real ground, so a nonsense plane fit on one can be
-#: replaced without anything noticing. 8 m2 is about where that changes.
-SALVAGE_BELOW_AREA = 8.0 * 32 * 32
-
-#: A ground plane steeper than this is not terrain, it is an artefact of three
-#: corners that happen to straddle a sharp feature or sit almost in a line.
-#: 45 degrees is already steeper than anything walkable.
-MAX_GRADIENT = 1.0
-
 
 
 def _floor_planes(
@@ -479,28 +500,33 @@ def _floor_planes(
     face_spec: list[SectorSpec],
     edges: dict,
     height_at,
-    min_width: float,
 ) -> list[tuple[float, float, float, float] | None]:
-    """A floor plane per face, with runaway gradients flattened in place.
+    """A floor plane per sloped face.
 
-    Three attempts at this, and the two failures are worth recording because
-    the middle path is not obvious.
+    Every face keeps the plane fitted exactly through its own three corners,
+    and that exactness is the whole continuity mechanism: three points define a
+    plane, adjacent triangles share two of them, so their planes agree along
+    the edge they share -- everywhere, with no tolerance to tune.
 
-    *Rejecting* a steep fit made the face fall back to a flat average height,
-    and the steps that left against its sloped neighbours were harder barriers
-    than any slope: unreachable ground went 0.41% -> 2.14%.
+    Three rounds of "salvage" were built on top of this to tame steep fits, and
+    every one made things worse, because a salvaged plane no longer passes
+    through the shared corners and therefore steps the face's whole perimeter.
+    Measured on ground-to-ground joins, walls over half a metre: 43 with
+    salvage, 10 without. A steep fit left alone is not a spire; it is a steep
+    wedge meeting its neighbours exactly, which is what a bank looks like.
 
-    *Inheriting* a neighbour's plane removed the shards but put the face at the
-    neighbour's height rather than its own, which just moved the steps to its
-    other edges: 2.13% unreachable, no better.
+    A width threshold was tried here too, on the theory that a face too thin to
+    fit anything meaningful through should take a neighbour's plane instead.
+    Same mistake in a smaller hat: an adopted plane misses the sliver's *own*
+    corners, so every edge it has steps. It tripled the walls over a metre,
+    from 8 to 33.
 
-    What works is to keep the face's own plane and clamp only what is wrong
-    with it. A sliver whose three corners sit almost in a line, or straddle a
-    wall in the DTM, fits a near-vertical plane -- gradients up to 64, which
-    render as shards spearing into the sky. Scaling the gradient back to
-    something walkable and re-anchoring the plane through the face's true
-    centroid height keeps it where the ground actually is, so neighbours still
-    meet it, and the shard is gone because the slope is bounded.
+    That leaves only faces with no plane at all -- three corners that round to
+    collinear integers, so nothing passes through them. Those adopt the plane
+    across their **longest** edge. It cannot be exact everywhere, but it is
+    exact along the edge with the most wall to build: the worst case here was a
+    ribbon 0.34m wide and 14m long, and a 4m step down its long side is the
+    grass-textured blade standing in the sky that started all this.
     """
     planes: list[tuple[float, float, float, float] | None] = []
     for index, (face, _owner) in enumerate(owned):
@@ -508,59 +534,48 @@ def _floor_planes(
         if not spec.sloped or height_at is None:
             planes.append(None)
             continue
+        planes.append(_floor_plane(face, height_at))
 
-        plane = _floor_plane(face, height_at)
-        probe = face.representative_point()
-        if plane is None:
-            # No plane at all (collapsed corners): a horizontal one at the real
-            # ground height still beats leaving the sector at a spec default.
-            planes.append(_plane_through(0.0, 0.0, probe.x, probe.y, height_at(probe.x, probe.y)))
+    # Longest shared edge first, so an orphan touching only orphans still finds
+    # a resolved neighbour by the time its own turn comes.
+    joins: list[tuple[float, int, int]] = []
+    for (p, q), uses in edges.items():
+        if len(uses) != 2 or uses[0][0] == uses[1][0]:
             continue
+        length = math.dist(p, q)
+        joins.append((length, uses[0][0], uses[1][0]))
+    joins.sort(reverse=True)
 
-        a, b, c, _d = plane
-        slope_x, slope_y = -a / c, -b / c
-        gradient = (slope_x * slope_x + slope_y * slope_y) ** 0.5
-        if gradient <= MAX_GRADIENT:
-            planes.append(plane)
-            continue
+    # `face_spec`, not the owner's spec: `_absorb_slivers` may have handed this
+    # face a neighbour's spec, and reading the owner's here gave 128 faces a
+    # ground plane after the fit loop had (correctly) declined to give them one
+    # -- water and building floors tilted to follow the terrain under them, and
+    # disagreeing with every neighbour by up to five metres.
+    orphans = {
+        i
+        for i in range(len(owned))
+        if face_spec[i].sloped and height_at is not None and planes[i] is None
+    }
+    # Repeat until nothing more resolves: a run of orphans in a row hands the
+    # plane along one face per pass, and stopping after one pass leaves the
+    # far end of the run to fall back on level ground.
+    resolved = True
+    while resolved:
+        resolved = False
+        for _length, a, b in joins:
+            if a in orphans and planes[b] is not None:
+                planes[a], resolved = planes[b], True
+                orphans.discard(a)
+            elif b in orphans and planes[a] is not None:
+                planes[b], resolved = planes[a], True
+                orphans.discard(b)
 
-        # Only slivers get salvaged. Every salvage breaks the exact-corner fit
-        # that makes neighbours meet -- the plane no longer passes through the
-        # shared corners -- so it steps the face's entire perimeter. On a sliver
-        # that perimeter is centimetres and nothing notices; on a large face it
-        # opened a 983 m2 hole in the walkable area. Large faces keep their fit
-        # even when it is steep: continuity is worth more, and a big face with a
-        # genuinely steep fit is usually a genuinely steep bank.
-        if face.area >= SALVAGE_BELOW_AREA:
-            planes.append(plane)
-            continue
+    # An orphan with no sloped neighbour at all: level ground at its own height
+    # beats leaving the sector at whatever default its spec carries.
+    for index in orphans:
+        probe = owned[index][0].representative_point()
+        planes[index] = _plane_through(0.0, 0.0, probe.x, probe.y, height_at(probe.x, probe.y))
 
-        # Salvage a too-steep fit by measuring the ground instead of guessing
-        # from it. A fit this steep comes from three corners that are nearly
-        # collinear, or that straddle a step in the DTM, so neither its
-        # magnitude nor its direction means anything.
-        #
-        # Two rules were tried and both build walls out of nothing. Scaling the
-        # gradient back to 45 degrees keeps the meaningless direction and lays a
-        # ramp across flat ground: measured at one such face, 0.33m of real
-        # relief across 13m, with 2.4m walls built round it. Flattening outright
-        # leaves a step all the way round instead, and on a 64 m2 face that
-        # opened a 983 m2 hole in the walkable area.
-        #
-        # Central differences on the smoothed height field give the slope the
-        # ground actually has at that point. It is bounded because the field is
-        # smoothed, it needs no threshold, and it is right on flat ground and on
-        # a real bank alike.
-        step = float(UNITS_PER_METRE)
-        local_x = (height_at(probe.x + step, probe.y) - height_at(probe.x - step, probe.y)) / (
-            2 * step
-        )
-        local_y = (height_at(probe.x, probe.y + step) - height_at(probe.x, probe.y - step)) / (
-            2 * step
-        )
-        planes.append(
-            _plane_through(local_x, local_y, probe.x, probe.y, height_at(probe.x, probe.y))
-        )
     return planes
 
 
