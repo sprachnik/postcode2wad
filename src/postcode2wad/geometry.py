@@ -114,7 +114,15 @@ def _rings(poly: Polygon) -> list[list[tuple[float, float]]]:
 def build_geometry(
     specs: list[SectorSpec],
     things: list[Thing] | None = None,
-    min_face_area: float = 4.0,
+    #: Discarding sliver faces is not free, which is why this defaults to zero.
+    #: Every face dropped here leaves the edges it backed onto with a single
+    #: user, and a one-sided line is a solid wall running the full height of its
+    #: sector — 128m, here. On Birchington a threshold of 4.0 produced 372 such
+    #: walls, the longest 11m, visible in game as pale vertical streaks standing
+    #: in mid-air. Keeping every face removes all of them for about 4% more
+    #: sectors; `_drop_empty_sectors` still clears anything that loses all its
+    #: edges to integer snapping.
+    min_face_area: float = 0.0,
     horizon_border: bool = True,
 ) -> MapGeometry:
     """Arrange overlapping SectorSpecs into Doom-legal sector topology."""

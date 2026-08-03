@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from shapely.geometry import Point, Polygon
+from shapely.ops import nearest_points
 
 from . import UNITS_PER_METRE, art, textures
 from .features import (
@@ -139,11 +140,40 @@ def _best_facing(x: float, y: float, blocked: list[Polygon], size_units: int) ->
     return best_angle
 
 
-def _player_start(place: Place, tile: Tile, blocked: list[Polygon], size_units: int) -> Thing:
-    """Spawn at the postcode centroid, nudged clear of any building."""
+def _player_start(
+    place: Place,
+    tile: Tile,
+    blocked: list[Polygon],
+    size_units: int,
+    roads: list[Polygon] | None = None,
+) -> Thing:
+    """Spawn on the street nearest the postcode, else at the postcode itself.
+
+    Probing eight directions for open ground was not enough on a real tile: a
+    postcode centroid frequently lands in a back garden or a farmyard, where
+    *every* facing is a wall a few metres away and the best of eight is still a
+    wall. Standing on the carriageway instead gives an open view along the road
+    by construction, and "you appear on the street outside" is what someone
+    typing their own postcode expects anyway.
+    """
     x, y = tile.to_map(place.easting, place.northing)
     x = min(max(x, 96), size_units - 96)
     y = min(max(y, 96), size_units - 96)
+
+    if roads:
+        here = Point(x, y)
+        nearest = min(roads, key=here.distance)
+        # A point *on* the road: its own interior if we are already standing in
+        # it, otherwise the closest bit of tarmac to the postcode.
+        target = here if nearest.contains(here) else nearest_points(nearest, here)[0]
+        # Step a little way in from the edge so we are not clipping the kerb.
+        inward = nearest.representative_point()
+        length = max(1e-6, target.distance(inward))
+        step = min(24.0, length)
+        x = target.x + (inward.x - target.x) * step / length
+        y = target.y + (inward.y - target.y) * step / length
+        x = min(max(x, 96), size_units - 96)
+        y = min(max(y, 96), size_units - 96)
 
     def clear(px: float, py: float) -> bool:
         p = Point(px, py)
@@ -290,9 +320,15 @@ def build_tile(
             )
             stats.water += 1
 
+    # Kept for the player start: the carriageway is where we want to appear.
+    road_polygons: list[Polygon] = []
+    barrier_polygons: list[Polygon] = []
+
     if with_roads:
         for shape in roads_to_shapes(features.roads, tile):
             paved = shape.tags.get("highway", "") in PAVED_FOOTWAYS
+            if not paved:
+                road_polygons.append(shape.polygon)
             # Clip the corridor against each contour band so a road climbing a
             # hill steps with the ground instead of flattening across it.
             for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
@@ -313,6 +349,7 @@ def build_tile(
         # After roads so a hedge along a verge survives, before buildings so a
         # house laid over one still wins — the hedge stops at the wall.
         for shape in barriers_to_shapes(features.barriers, tile):
+            barrier_polygons.append(shape.polygon)
             wall = textures.barrier_wall(shape.tags)
             for piece, elevation_m in _split_by_bands(shape.polygon, bands, terrain_at):
                 specs.append(
@@ -355,7 +392,12 @@ def build_tile(
         )
         stats.buildings += 1
 
-    things = [_player_start(place, tile, [s.polygon for s in building_shapes], tile.size_units)]
+    # Barriers block too: spawning nose-first into a hedge is no better than
+    # spawning into a wall.
+    obstacles = [s.polygon for s in building_shapes] + barrier_polygons
+    things = [
+        _player_start(place, tile, obstacles, tile.size_units, roads=road_polygons)
+    ]
 
     if with_trees and dsm is not None and dtm is not None:
         for tree in vegetation(dsm, dtm, tile, exclude=[s.polygon for s in building_shapes]):

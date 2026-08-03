@@ -17,6 +17,7 @@ param(
     [int]$Seconds = 10,
     [string]$Map = "MAP01",
     [switch]$Interactive,
+    [switch]$CheckOnly,
     [string]$GzDoom = "",
     [string]$Iwad = "",
     [string]$LogFile = ""
@@ -40,12 +41,46 @@ $gzArgs = @(
     "-iwad", (Resolve-Path $Iwad).Path,
     "-file", (Resolve-Path $Pk3).Path,
     "-width", "1280", "-height", "720", "-windowed",
+    # -windowed loses to a saved fullscreen setting in gzdoom.ini, and an
+    # exclusive-fullscreen GZDoom cannot present while another one already holds
+    # the display -- the capture then comes back solid black with no error
+    # anywhere. Setting the cvar directly wins over the config file.
+    "+vid_fullscreen", "0",
     "+logfile", $LogFile,
     "+map", $Map
 )
 if (-not $Interactive) { $gzArgs += "-nosound" }
+#
 
 $proc = Start-Process -FilePath (Resolve-Path $GzDoom).Path -ArgumentList $gzArgs -PassThru
+
+# Load the map, then kill it and read the log. Neither "+quit" nor deferring it
+# through an alias works: both fire during console-command processing, which is
+# before the map is loaded, so they catch DECORATE and MAPINFO errors (fatal at
+# startup) but miss everything the map itself reports. Waiting and killing is
+# blunt but it actually gets past D_CheckNetGame. No window raising here, so it
+# does not fight whatever else is on screen.
+if ($CheckOnly) {
+    Start-Sleep -Seconds $Seconds
+    if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+
+    $log = Get-Content $LogFile -ErrorAction SilentlyContinue
+    if (-not ($log | Select-String -Pattern "^$Map -" -Quiet)) {
+        Write-Output "map never loaded - last lines:"
+        $log | Select-Object -Last 6
+        exit 1
+    }
+
+    $bad = $log | Select-String -Pattern "Script error", "Execution could not continue",
+        "Unknown texture", "has no lines", "is not a valid", "Bad sidedef", "Warning"
+    if ($bad) {
+        Write-Output "=== problems ==="
+        $bad | ForEach-Object { Write-Output $_.Line }
+        exit 1
+    }
+    Write-Output "loaded clean: $Pk3 ($($log.Count) log lines)"
+    exit 0
+}
 
 if ($Interactive) {
     Write-Output "GZDoom running (PID $($proc.Id)). Close the window when done."
