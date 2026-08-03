@@ -77,6 +77,22 @@ class SectorSpec:
     #: to a sloped spec are cut into triangles and given per-vertex heights, so
     #: the surface ramps rather than stepping.
     sloped: bool = False
+    #: This spec's own height field, overriding the arrangement-wide one for
+    #: its faces. Same signature: map units in, floor units out.
+    #:
+    #: The arrangement-wide sampler is a function of (x, y), which is right for
+    #: terrain and wrong for anything built. A road or a pavement is level
+    #: across its width by construction, so fitting it to a 2-D field copies
+    #: that field's cross-slope noise onto a surface that should not have any.
+    #: A spec that knows better -- a road, from its own centreline -- supplies
+    #: the height itself.
+    #:
+    #: Continuity survives this because it never depended on the *sampler*, only
+    #: on it being a deterministic function of the rounded corner: two faces
+    #: sharing a spec still sample identical values at the two corners they
+    #: share, so their planes still meet exactly. Faces on opposite sides of a
+    #: spec boundary do step, which is the kerb.
+    height_at: object | None = None
 
 
 @dataclass
@@ -230,9 +246,10 @@ def build_geometry(
             probe = face.representative_point()
             a, b, c, d = plane
             face_floor.append(round(-(a * probe.x + b * probe.y + d) / c))
-        elif spec.sloped and height_at is not None:
+        elif spec.sloped and (spec.height_at or height_at) is not None:
+            here = spec.height_at or height_at
             ring = list(face.exterior.coords)[:-1]
-            heights = [height_at(x, y) for x, y in ring]
+            heights = [here(x, y) for x, y in ring]
             face_floor.append(round(sum(heights) / len(heights)) if heights else spec.floor)
         else:
             face_floor.append(spec.floor)
@@ -549,13 +566,17 @@ def _floor_planes(
     ribbon 0.34m wide and 14m long, and a 4m step down its long side is the
     grass-textured blade standing in the sky that started all this.
     """
+    def sampler(index: int):
+        """The height field for one face: its spec's own, else the tile's."""
+        return face_spec[index].height_at or height_at
+
     planes: list[tuple[float, float, float, float] | None] = []
     for index, (face, _owner) in enumerate(owned):
         spec = face_spec[index]
-        if not spec.sloped or height_at is None:
+        if not spec.sloped or sampler(index) is None:
             planes.append(None)
             continue
-        planes.append(_floor_plane(face, height_at))
+        planes.append(_floor_plane(face, sampler(index)))
 
     # Longest shared edge first, so an orphan touching only orphans still finds
     # a resolved neighbour by the time its own turn comes.
@@ -575,7 +596,7 @@ def _floor_planes(
     orphans = {
         i
         for i in range(len(owned))
-        if face_spec[i].sloped and height_at is not None and planes[i] is None
+        if face_spec[i].sloped and sampler(i) is not None and planes[i] is None
     }
     # Repeat until nothing more resolves: a run of orphans in a row hands the
     # plane along one face per pass, and stopping after one pass leaves the
@@ -595,7 +616,8 @@ def _floor_planes(
     # beats leaving the sector at whatever default its spec carries.
     for index in orphans:
         probe = owned[index][0].representative_point()
-        planes[index] = _plane_through(0.0, 0.0, probe.x, probe.y, height_at(probe.x, probe.y))
+        here = sampler(index)
+        planes[index] = _plane_through(0.0, 0.0, probe.x, probe.y, here(probe.x, probe.y))
 
     return planes
 

@@ -101,6 +101,26 @@ DEFAULT_SLOPED_STEP_M = 4.0
 #: surface visibly faceted. Kept well under the scale of real landform.
 GROUND_SMOOTH_M = 4.0
 
+#: Spacing of the samples taken along a road's centreline, and the half-width
+#: of the straight-line fit run over them.
+#:
+#: 12m of fit either side is chosen against the thing being removed: the DTM is
+#: smoothed at a 4m radius, so cross-slope noise survives at wavelengths above
+#: that, and a road has to be smoothed over meaningfully more than the noise to
+#: be flatter than it. It is also short enough to keep a real hump-backed bridge
+#: or a dip at a ford, which run over 20m or more.
+ROAD_PROFILE_STEP_M = 2.0
+ROAD_PROFILE_SMOOTH_M = 12.0
+
+#: How far a road surface may be pulled away from the ground beside it, in map
+#: units. Doom's climb limit is 24 units, and this bounds the step at every join
+#: a road makes: against the ground beside it the step is at most this, and
+#: where two different ways meet each is within this of the same ground, so at
+#: most twice this. 10 units (31cm) therefore leaves a 20-unit worst case with
+#: room to spare, while being enough to absorb the cross-slope noise measured
+#: on real pavements -- the 90th percentile of the correction is under 4 units.
+ROAD_LIFT_LIMIT = 10.0
+
 PLAYER_START = 1
 
 PAVED_FOOTWAYS = {"footway", "path", "pedestrian", "steps", "cycleway", "bridleway"}
@@ -249,6 +269,91 @@ def _player_start(
     )
 
 
+def _straighten(values: list[float], radius: int) -> list[float]:
+    """Smooth a 1-D profile by a local straight-line fit through its window.
+
+    A box average was tried here first and is wrong at the ends. Averaging a
+    truncated window over a road on a constant gradient pulls the last sample
+    toward the middle of the window, so a 10% slope running off the end of a way
+    finished 2.6m below its own ground -- the single largest error in the whole
+    approach, and it appeared exactly where two ways meet, which is where a step
+    is least forgivable. A straight-line fit reproduces a constant gradient
+    exactly however much of the window it can see, so the bias is zero at the
+    ends by construction. Measured on Birchington: the 90th percentile of the
+    correction fell from 9.8 units to 3.5 on footways.
+    """
+    count = len(values)
+    out: list[float] = []
+    for i in range(count):
+        lo, hi = max(0, i - radius), min(count, i + radius + 1)
+        n = hi - lo
+        if n < 2:
+            out.append(values[i])
+            continue
+        sum_x = sum(range(lo, hi))
+        sum_xx = sum(j * j for j in range(lo, hi))
+        sum_y = sum(values[lo:hi])
+        sum_xy = sum(j * values[j] for j in range(lo, hi))
+        denominator = n * sum_xx - sum_x * sum_x
+        if denominator == 0:
+            out.append(sum_y / n)
+            continue
+        gradient = (n * sum_xy - sum_x * sum_y) / denominator
+        out.append((sum_y - gradient * sum_x) / n + gradient * i)
+    return out
+
+
+def _road_surface(line, ground_at, limit: float = ROAD_LIFT_LIMIT):
+    """A road's height as a function of distance along its own centreline.
+
+    A carriageway is an engineered surface: level across its width, smoothly
+    graded along its length. The arrangement-wide sampler is a function of
+    (x, y), so fitting a road to it copies the ground's cross-slope wobble onto
+    a surface that in life has none -- and the smaller the surface, the worse it
+    reads, because the DTM is smoothed at a 4m radius and a pavement is 2m wide.
+    Measured on the nine Birchington tiles, the angle between neighbouring
+    same-material faces at the 95th percentile was 18.2 degrees on pavement
+    against 5.4 on tarmac, for exactly that reason.
+
+    So the height stops being a function of position and becomes a function of
+    *distance along the way*: sample the smoothed ground along the centreline,
+    fit a straight line through a moving window of it, and read that off. Across
+    the width it is then constant, which is the whole point.
+
+    The result is clamped to within `limit` of the ground it replaces. Without
+    that a road crossing a bank could hang a metre over it. With it, every step
+    the road makes is bounded: against the ground beside it by `limit`, and
+    against a different way's surface by twice `limit`, since both are anchored
+    to the same ground where they meet.
+    """
+    step = ROAD_PROFILE_STEP_M * UNITS_PER_METRE
+    count = max(2, int(line.length / step) + 1)
+    step = line.length / (count - 1)
+    heights = [
+        ground_at(*line.interpolate(step * i).coords[0]) for i in range(count)
+    ]
+    heights = _straighten(heights, max(1, round(ROAD_PROFILE_SMOOTH_M * UNITS_PER_METRE / step)))
+
+    cache: dict[tuple[int, int], float] = {}
+
+    def at(x: float, y: float) -> float:
+        # Keyed on the rounded position because that is what the plane fitter
+        # samples, and two faces sharing a corner must get identical answers
+        # from it or their planes part company along the edge they share.
+        key = (round(x), round(y))
+        if key in cache:
+            return cache[key]
+        along = line.project(Point(*key))
+        index = min(count - 2, int(along / step))
+        fraction = min(1.0, max(0.0, (along - index * step) / step))
+        height = heights[index] + fraction * (heights[index + 1] - heights[index])
+        ground = ground_at(*key)
+        cache[key] = min(max(height, ground - limit), ground + limit)
+        return cache[key]
+
+    return at
+
+
 def build_tile(
     place: Place,
     size_m: int = 400,
@@ -343,6 +448,14 @@ def build_tile(
             return 0.0
         return ground_height_m(dtm, tile, polygon)
 
+    # Built here rather than at the `build_geometry` call because the roads
+    # below need it too: each one derives its own height profile from it.
+    ground_at = (
+        height_sampler(dtm, tile, GROUND_SMOOTH_M)
+        if (with_slopes and dtm is not None)
+        else None
+    )
+
     if with_landuse:
         # Land cover changes the *surface*, not the height, so each parcel is
         # cut against the contour bands and each piece keeps its band's floor.
@@ -433,6 +546,15 @@ def build_tile(
             walkable_polygons.append(shape.polygon)
             if not paved:
                 road_polygons.append(shape.polygon)
+            # A road's surface is level across its width, so it takes its height
+            # from its own centreline rather than from the ground field. Every
+            # piece of one way shares the profile, so pieces split apart by the
+            # tile edge or by a junction still meet each other exactly.
+            surface = (
+                _road_surface(shape.centre, ground_at)
+                if ground_at is not None and shape.centre is not None
+                else None
+            )
             # Clip the corridor against each contour band so a road climbing a
             # hill steps with the ground instead of flattening across it.
             for piece, elevation_m in _split_by_bands(
@@ -448,6 +570,7 @@ def build_tile(
                         wall_tex=textures.KERB,
                         light=ROAD_LIGHT,
                         sloped=with_slopes,
+                        height_at=surface,
                     )
                 )
                 stats.roads += 1
@@ -561,15 +684,7 @@ def build_tile(
             )
             stats.trees += 1
 
-    geometry = build_geometry(
-        specs,
-        things=things,
-        height_at=(
-            height_sampler(dtm, tile, GROUND_SMOOTH_M)
-            if (with_slopes and dtm is not None)
-            else None
-        ),
-    )
+    geometry = build_geometry(specs, things=things, height_at=ground_at)
 
     stats.sectors = len(geometry.sectors)
     stats.linedefs = len(geometry.linedefs)

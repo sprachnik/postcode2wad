@@ -83,6 +83,12 @@ class Shape:
     #: The OSM way/relation it came from. Used to pick a stable façade material
     #: per building, so a street varies but regenerating the tile does not.
     osm_id: int = 0
+    #: The line this shape was buffered out from, in map units, where it had
+    #: one. A road's centreline is the axis its surface is engineered along, so
+    #: it is the parameter the height should be a function of — see
+    #: `build._road_surface`. Kept unclipped and unsimplified: it is a
+    #: parameterisation, not geometry to be drawn.
+    centre: LineString | None = None
 
     @property
     def name(self) -> str:
@@ -234,7 +240,7 @@ def roads_to_shapes(
             join_style=2,  # mitred corners, far fewer vertices than round
         )
         for part in _clean(corridor, clip, simplify_units):
-            shapes.append(Shape(polygon=part, tags=feature.tags))
+            shapes.append(Shape(polygon=part, tags=feature.tags, centre=line))
     return shapes
 
 

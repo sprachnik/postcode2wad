@@ -100,6 +100,17 @@ def height_sampler(dtm: Raster, tile: Tile, smooth_m: float = 0.0):
     mesh vertex and the DTM is already 1m, finer than anything the geometry
     resolves. `ground_height_m` rasterises a polygon mask per call and is orders
     of magnitude too slow for this.
+
+    Positions off the raster **clamp to its edge pixel** rather than falling
+    back to the tile's median height. The fallback was not a rare path: a 400m
+    tile gets a 400x400 raster, so the tile's own eastern and southern borders
+    -- x or y exactly `size_units`, which is where every border face has its
+    corners -- indexed row or column 400 and read the median. On this tile that
+    is 2.7m away from the truth, so the whole edge of the arrangement was fitted
+    to a height nothing else agreed with. It also matters for anything sampled
+    *outside* the tile, which is how a road centreline is: OSM ways run past the
+    tile edge, and a profile built along one was reading the median for every
+    sample beyond it.
     """
     values = smooth_heights(dtm, smooth_m) if smooth_m > 0 else dtm.values
     rows, cols = values.shape
@@ -109,10 +120,8 @@ def height_sampler(dtm: Raster, tile: Tile, smooth_m: float = 0.0):
     def at(x: float, y: float) -> float:
         e = origin_e + x / UNITS_PER_METRE
         n = origin_n + y / UNITS_PER_METRE
-        col = int((e - dtm.min_e) / dtm.pixel_m)
-        row = int((dtm.max_n - n) / dtm.pixel_m)
-        if not (0 <= row < rows and 0 <= col < cols):
-            return fallback * UNITS_PER_METRE
+        col = min(cols - 1, max(0, int((e - dtm.min_e) / dtm.pixel_m)))
+        row = min(rows - 1, max(0, int((dtm.max_n - n) / dtm.pixel_m)))
         value = values[row, col]
         if not np.isfinite(value):
             value = fallback
