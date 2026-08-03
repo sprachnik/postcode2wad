@@ -28,12 +28,30 @@ from .sources import overpass
 from .sources.postcodes import Place
 from .tiles import Tile, osgb_to_lonlat
 
-#: Doom map lump names are MAPxx, so 99 is the hard ceiling — a 9x9 block.
-MAX_MAPS = 99
+#: Maps are named M0001, M0002, ... rather than MAP01.
+#:
+#: MAPxx has only two digits, which capped a pack at 99 maps — a 9x9 block, or
+#: 3.2km square at 400m tiles. Since you cannot cross between PK3s at runtime
+#: (GZDoom fixes its file set at startup) that was a hard ceiling on how large a
+#: single continuous world could be. Five characters is still well inside the
+#: 8-character lump name limit and lifts it to 9,999 maps, which at 400m is
+#: 1,600 km² — larger than any pack anyone will actually generate.
+MAPXX_LIMIT = 99
+MAX_MAPS = 9999
 
 
-def map_name(index: int) -> str:
-    return f"MAP{index + 1:02d}"
+def map_name(index: int, count: int = 1) -> str:
+    """MAPxx while it fits, M0001-style beyond it.
+
+    Keeping MAP01 for packs of 99 or fewer is not nostalgia: `+map MAP01` is the
+    documented invocation, and GZDoom's own "new game" menu entry loads MAP01,
+    so a pack without one cannot be started from the menu at all. Every pack
+    anyone generates by hand is inside that limit; the wider scheme exists so
+    the ceiling is not a wall.
+    """
+    if count <= MAPXX_LIMIT:
+        return f"MAP{index + 1:02d}"
+    return f"M{index + 1:04d}"
 
 
 def region_bbox_wgs84(centre: Tile, radius: int) -> tuple[float, float, float, float]:
@@ -105,7 +123,8 @@ def build_region(
     side = radius * 2 + 1
     if side * side > MAX_MAPS:
         raise ValueError(
-            f"radius {radius} needs {side * side} maps; MAPxx only goes to {MAX_MAPS}"
+            f"radius {radius} needs {side * side} maps; the naming scheme "
+            f"only goes to {MAX_MAPS}"
         )
 
     centre = Tile.containing(place.easting, place.northing, size_m)
@@ -122,7 +141,7 @@ def build_region(
     for dy in range(-radius, radius + 1):
         for dx in range(-radius, radius + 1):
             tile = centre.neighbour(dx, dy)
-            name = map_name(index)
+            name = map_name(index, side * side)
             if progress:
                 progress(index, side * side, name, tile)
 

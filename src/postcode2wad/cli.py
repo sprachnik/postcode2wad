@@ -145,9 +145,12 @@ def _run_region(args, place, cache_dir: Path, tile_options: dict) -> int:
         maps.append((entry.map_name, entry.built.title, textmap))
 
     if not args.no_hud:
+        minimap_digits = len(region.tiles[0].map_name) - len(
+            "".join(c for c in region.tiles[0].map_name if not c.isdigit())
+        )
         for index, entry in enumerate(region.tiles):
             # One minimap per tile, named to match its map number.
-            extra[f"graphics/DMMIN{index + 1:02d}.png"] = render_minimap(
+            extra[f"graphics/DMMIN{index + 1:0{minimap_digits}d}.png"] = render_minimap(
                 entry.built.geometry, tile_units=entry.tile.size_units
             )
         extra[ZSCRIPT_LUMP] = build_zscript(
@@ -246,10 +249,10 @@ def main(argv: list[str] | None = None) -> int:
     extra: dict[str, bytes] = {}
     handler: str | None = None
     if not args.no_hud:
-        from .hud import HANDLER, MINIMAP, ZSCRIPT_LUMP, build_zscript
+        from .hud import HANDLER, ZSCRIPT_LUMP, build_zscript
         from .preview import render_minimap
 
-        extra[f"graphics/{MINIMAP}.png"] = render_minimap(
+        extra["graphics/DMMIN01.png"] = render_minimap(
             built.geometry, tile_units=built.tile.size_units
         )
         # A single tile is the one-entry case of a region; same code path.

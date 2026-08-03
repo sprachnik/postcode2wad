@@ -78,18 +78,31 @@ def build_zscript(tiles: list[Tile], map_names: list[str]) -> str:
 
     geos = [georeference(t) for t in tiles]
     mid = geos[len(geos) // 2]
-    # Map names are MAPnn and the script derives them from the index, so the
-    # ordering here is load-bearing: index i must be map_names[i].
+
+    # The script derives map names from the index, so the ordering here is
+    # load-bearing: index i must be map_names[i]. Which of the two schemes is in
+    # play is decided by the pack size, and both are parsed the same way in
+    # ZScript: a fixed prefix then a fixed run of digits.
+    from .region import map_name as _map_name
+
+    count = len(tiles)
     for index, name in enumerate(map_names):
-        expected = f"MAP{index + 1:02d}"
+        expected = _map_name(index, count)
         if name != expected:
             raise ValueError(f"map {index} is {name}, expected {expected}")
+
+    prefix = "".join(c for c in map_names[0] if not c.isdigit())
+    digits = len(map_names[0]) - len(prefix)
 
     return _TEMPLATE.format(
         version=ZSCRIPT_VERSION,
         count=len(tiles),
         tile_units=float(tiles[0].size_units),
         edge=float(EDGE_UNITS),
+        prefix=prefix,
+        prefix_len=len(prefix),
+        digits=digits,
+        name_len=len(map_names[0]),
         reentry=float(REENTRY_UNITS),
         ix=_array(t.ix for t in tiles),
         iy=_array(t.iy for t in tiles),
@@ -175,9 +188,9 @@ class PostcodeHUD : StaticEventHandler
     // as an unrelated unknown identifier.
     clearscope int TileIndexFor(String mapname)
     {{
-        // "MAP07" -> 6. Nothing else in the pack is named this way.
-        if (mapname.Length() != 5) return -1;
-        int n = mapname.Mid(3, 2).ToInt();
+        // "{prefix}0007" -> 6. Nothing else in the pack is named this way.
+        if (mapname.Length() != {name_len}) return -1;
+        int n = mapname.Mid({prefix_len}, {digits}).ToInt();
         if (n < 1 || n > TILE_COUNT) return -1;
         return n - 1;
     }}
@@ -185,13 +198,13 @@ class PostcodeHUD : StaticEventHandler
     // Play-side only.
     String MapNameFor(int index)
     {{
-        return String.Format("MAP%02d", index + 1);
+        return String.Format("{prefix}%0{digits}d", index + 1);
     }}
 
     // ui-side only.
     ui String MinimapFor(int index)
     {{
-        return String.Format("DMMIN%02d", index + 1);
+        return String.Format("DMMIN%0{digits}d", index + 1);
     }}
 
     // Not static: a static function cannot see the class's own static const
