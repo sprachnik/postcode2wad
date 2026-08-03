@@ -172,9 +172,12 @@ class PostcodeHUD : StaticEventHandler
     const MIN_PANEL   = 120;
 
     // Hand-off across a level change. Set when we decide to move, applied once
-    // the destination has loaded.
+    // the destination has loaded. pendingZ is the ground height we left from:
+    // terrain is at absolute ordnance-datum heights in every tile, so it is
+    // directly comparable on the far side and tells a street apart from the
+    // roof of the building next to it.
     int pending;
-    double pendingX, pendingY, pendingAngle;
+    double pendingX, pendingY, pendingZ, pendingAngle;
     int cooldown;
 
     override void OnRegister()
@@ -248,11 +251,28 @@ class PostcodeHUD : StaticEventHandler
         pendingX = x; pendingY = y;
         if (dx > 0) pendingX = REENTRY; else if (dx < 0) pendingX = TILE_UNITS - REENTRY;
         if (dy > 0) pendingY = REENTRY; else if (dy < 0) pendingY = TILE_UNITS - REENTRY;
+        pendingZ = p.mo.pos.z;
         pendingAngle = p.mo.angle;
         pending = target;
 
         cooldown = 35;
         level.ChangeLevel(MapNameFor(target), 0, TRANSITION_FLAGS, -1);
+    }}
+
+    // Put the actor at (x, y) on its floor and say whether it can exist there.
+    // Two ways an arrival spot is wrong: something solid already occupies it (a
+    // tree -- being wedged inside one leaves the player unable to move at all),
+    // or it is on top of something rather than on the ground. The second is
+    // what pendingZ is for: floors are at absolute datum heights in every tile,
+    // so an arrival floor far above the departure floor means a roof or a
+    // hedge top, not the street the player was walking along.
+    bool TryPlace(Actor mo, double x, double y)
+    {{
+        mo.SetOrigin((x, y, mo.pos.z), false);
+        mo.FindFloorCeiling();
+        mo.SetZ(mo.floorz);
+        if (!mo.TestMobjLocation()) return false;
+        return abs(mo.floorz - pendingZ) <= 160;   // within 5m of departure
     }}
 
     override void WorldLoaded(WorldEvent e)
@@ -262,11 +282,30 @@ class PostcodeHUD : StaticEventHandler
         PlayerInfo p = players[consoleplayer];
         if (p != null && p.mo != null)
         {{
-            p.mo.SetOrigin((pendingX, pendingY, p.mo.pos.z), false);
-            // Terrain heights are absolute across tiles so z is nearly right
-            // already, but snap to the floor rather than trusting that.
-            p.mo.FindFloorCeiling();
-            p.mo.SetZ(p.mo.floorz);
+            if (!TryPlace(p.mo, pendingX, pendingY))
+            {{
+                // Blocked or on a roof: spiral outward for the nearest clear
+                // spot at street level. 512 units is 16m -- enough to step
+                // around any tree or building that straddles the seam.
+                bool placed = false;
+                for (int ring = 64; ring <= 512 && !placed; ring += 64)
+                {{
+                    for (int k = 0; k < 8 && !placed; k++)
+                    {{
+                        double a = k * 45.0;
+                        placed = TryPlace(p.mo,
+                            pendingX + cos(a) * ring, pendingY + sin(a) * ring);
+                    }}
+                }}
+                if (!placed)
+                {{
+                    // Nowhere passed both checks; settle for the original spot
+                    // rather than leaving the player wherever the loop ended.
+                    p.mo.SetOrigin((pendingX, pendingY, p.mo.pos.z), false);
+                    p.mo.FindFloorCeiling();
+                    p.mo.SetZ(p.mo.floorz);
+                }}
+            }}
             p.mo.angle = pendingAngle;
         }}
         pending = -1;

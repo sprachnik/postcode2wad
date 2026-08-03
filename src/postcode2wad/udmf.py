@@ -64,9 +64,12 @@ def emit_textmap(geo: MapGeometry, comment: str | None = None) -> str:
     if comment:
         lines[1:1] = [f"// {line}" for line in comment.splitlines()]
 
-    # `zfloor` is what makes terrain slope. GZDoom applies it only to sectors
-    # with exactly three sides, so it is harmless on a vertex that a flat
-    # four-sided sector also happens to use.
+    # Per-vertex floor heights. Terrain slope now comes from per-sector plane
+    # equations (see geometry._floor_plane) precisely because zfloor is shared:
+    # GZDoom applies it to any three-sided sector touching the vertex, which
+    # dragged building roofs down to terrain height. The plumbing stays because
+    # it is the right tool for anything that *wants* shared heights, but nothing
+    # populates vertex_floor today.
     for index, (x, y) in enumerate(geo.vertices):
         fields = {"x": float(x), "y": float(y)}
         height = geo.vertex_floor.get(index)

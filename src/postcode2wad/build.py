@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from shapely.geometry import Point, Polygon
-from shapely.ops import nearest_points
+from shapely.ops import nearest_points, unary_union
 
 from . import UNITS_PER_METRE, art, textures
 from .features import (
@@ -436,25 +436,44 @@ def build_tile(
     if with_barriers:
         # After roads so a hedge along a verge survives, before buildings so a
         # house laid over one still wins — the hedge stops at the wall.
+        #
+        # Cut at every right of way, footpaths included. OSM draws a field
+        # boundary as one unbroken way even where a path crosses it — the gate
+        # or stile is a node, which this pipeline drops — so an uncut hedge
+        # walls the path off dead. Where the hedge meets the path it now simply
+        # stops, and the gap left behind is the gate. Enclosed back gardens
+        # keep their hedges: no path crosses them, so nothing is cut.
+        walkable_union = unary_union(walkable_polygons) if walkable_polygons else None
         for shape in barriers_to_shapes(features.barriers, tile):
-            barrier_polygons.append(shape.polygon)
+            barrier = shape.polygon
+            if walkable_union is not None:
+                barrier = barrier.difference(walkable_union)
+            if barrier.is_empty:
+                continue
             wall = textures.barrier_wall(shape.tags)
-            for piece, elevation_m in _split_by_bands(
-                shape.polygon, bands, terrain_at, with_slopes
-            ):
-                specs.append(
-                    SectorSpec(
-                        polygon=piece,
-                        floor=round((elevation_m + shape.height_m) * UNITS_PER_METRE),
-                        ceiling=sky_height,
-                        floor_tex=textures.HEDGE_TOP
-                        if wall == textures.HEDGE
-                        else textures.CONCRETE,
-                        wall_tex=wall,
-                        light=DAYLIGHT,
-                        thin=True,   # a fence is meant to be this narrow
+            parts = [
+                g
+                for g in getattr(barrier, "geoms", [barrier])
+                if isinstance(g, Polygon) and g.area > 0.25 * UNITS_PER_METRE**2
+            ]
+            barrier_polygons.extend(parts)
+            for part in parts:
+                for piece, elevation_m in _split_by_bands(
+                    part, bands, terrain_at, with_slopes
+                ):
+                    specs.append(
+                        SectorSpec(
+                            polygon=piece,
+                            floor=round((elevation_m + shape.height_m) * UNITS_PER_METRE),
+                            ceiling=sky_height,
+                            floor_tex=textures.HEDGE_TOP
+                            if wall == textures.HEDGE
+                            else textures.CONCRETE,
+                            wall_tex=wall,
+                            light=DAYLIGHT,
+                            thin=True,   # a fence is meant to be this narrow
+                        )
                     )
-                )
             stats.barriers += 1
 
     building_shapes = buildings_to_shapes(features.buildings, tile)
