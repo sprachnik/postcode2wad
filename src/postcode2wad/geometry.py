@@ -182,6 +182,7 @@ def build_geometry(
         raise ValueError("no face fell inside any SectorSpec")
 
     owned = _triangulate_sloped(owned)
+    owned = _drop_degenerate_faces(owned)
 
     # Collect directed ring segments. Face interior is always on the LEFT of p->q.
     edges: dict[tuple[Coord, Coord], list[tuple[int, Coord, Coord]]] = {}
@@ -345,6 +346,40 @@ def _triangulate_sloped(
     return out
 
 
+def _drop_degenerate_faces(
+    owned: list[tuple[Polygon, SectorSpec]],
+) -> list[tuple[Polygon, SectorSpec]]:
+    """Remove faces that collapse under integer vertex snapping.
+
+    Vertices are rounded to integers on emit. A triangle whose corners round to
+    two distinct points -- or three collinear ones -- has no interior left at
+    map precision, and it is worse than useless: its edges collapse onto the
+    same key as the segment its healthy neighbours share, making that edge
+    non-manifold, and the "keep the first two users" fallback then silently
+    discards one healthy neighbour's side. That leaves the neighbour's sector
+    unclosed, and GZDoom's node builder turns unclosed sectors into phantom
+    collision pockets. Found by an automated walk test: the player, shoved at
+    8 units/tic across open ground at the spawn, moved 1 unit per second.
+
+    Dropping these is safe precisely because they have no rounded interior:
+    with the degenerate face gone, its healthy neighbours' edges pair with each
+    other and the topology is manifold again.
+    """
+    kept: list[tuple[Polygon, SectorSpec]] = []
+    for face, spec in owned:
+        ring = [(round(x), round(y)) for x, y in list(face.exterior.coords)[:-1]]
+        distinct = list(dict.fromkeys(ring))
+        if len(distinct) < 3:
+            continue
+        doubled_area = 0
+        for (x1, y1), (x2, y2) in zip(distinct, distinct[1:] + distinct[:1]):
+            doubled_area += x1 * y2 - x2 * y1
+        if abs(doubled_area) < 2:  # under one square map unit: nothing survives
+            continue
+        kept.append((face, spec))
+    return kept
+
+
 def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] | None:
     """The ground plane under a face, as UDMF `floorplane_a..d`.
 
@@ -381,9 +416,27 @@ def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] 
     norm = (a * a + b * b + c * c) ** 0.5
     if norm == 0:
         return None
-    # GZDoom wants the normal pointing up, i.e. c negative in its convention.
-    sign = -1.0 if c > 0 else 1.0
+    # The floor normal must point UP, into the sector: c positive. The first
+    # version of this forced c negative, and the result was diabolical -- the
+    # plane RENDERS identically (ZatPoint is sign-agnostic), the player STANDS
+    # on it at the right height, but the physics treats everything above a
+    # downward-facing floor as inside solid ground and rejects every horizontal
+    # move. Symptom: pinned to the spot on open grass, at full render quality,
+    # with jumping still working. Only an automated walk test (shove the player
+    # four ways, log displacement: 1 unit per second everywhere) made it
+    # diagnosable, because every *visual* check passed.
+    sign = 1.0 if c > 0 else -1.0
     a, b, c = a / norm * sign, b / norm * sign, c / norm * sign
+
+    # Cap the steepness. A triangle whose corners straddle a sharp feature in
+    # the DTM -- a retaining wall, a bank, LIDAR noise at a hedge line -- fits a
+    # near-vertical plane (the worst measured was gradient 64). The engine
+    # cannot walk anything like that, and worse, a plane that steep makes
+    # floorz under a straddling actor swing wildly. Refusing the plane makes
+    # the sector fall back to its flat ring-average height, so a genuine bank
+    # renders as a terraced step instead of an invisible slide.
+    if (a * a + b * b) ** 0.5 > abs(c):   # steeper than 45 degrees
+        return None
     d = -(a * x1 + b * y1 + c * z1)
     return (a, b, c, d)
 

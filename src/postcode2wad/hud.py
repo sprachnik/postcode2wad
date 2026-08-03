@@ -258,7 +258,11 @@ class PostcodeHUD : StaticEventHandler
         double spd = p.mo.vel.xy.Length();
         bool pushing = (fwd != 0 || side != 0);
 
-        if (pushing && spd < 0.5 && p.mo.health > 0)
+        // Walking speed is ~6 units/tic, so below 2 with keys held is jammed
+        // against *something*, even if it is technically creeping. The first
+        // threshold here was 0.5, and a genuinely pinned player creeping at
+        // 0.8 never tripped it.
+        if (pushing && spd < 2.0 && p.mo.health > 0)
         {{
             stuckTicks++;
         }}
@@ -289,14 +293,59 @@ class PostcodeHUD : StaticEventHandler
             FmtLatLng(p.mo.pos.x, p.mo.pos.y), p.mo.angle, fwd, side, spd);
     }}
 
+    // Self-test rig: "netevent walktest" shoves the player 8 units/tic in each
+    // of four compass directions for a second apiece, no human input involved,
+    // and logs how far they actually travelled. Healthy ground moves ~280
+    // units per direction; an engine-level blockage moves single digits. This
+    // exists to distinguish "the map is wrong" from "the input is wrong"
+    // without anyone having to sit at the keyboard.
+    int walkTest;
+    int walkPhase;
+    double walkStartX, walkStartY;
+
     override void NetworkProcess(ConsoleEvent e)
     {{
-        if (!(e.Name ~== "mark")) return;
         PlayerInfo p = players[consoleplayer];
         if (p == null || p.mo == null) return;
-        Console.Printf("P2W MARK map=%s x=%.0f y=%.0f %s",
-            level.MapName, p.mo.pos.x, p.mo.pos.y,
-            FmtLatLng(p.mo.pos.x, p.mo.pos.y));
+
+        if (e.Name ~== "mark")
+        {{
+            Console.Printf("P2W MARK map=%s x=%.0f y=%.0f %s",
+                level.MapName, p.mo.pos.x, p.mo.pos.y,
+                FmtLatLng(p.mo.pos.x, p.mo.pos.y));
+        }}
+        else if (e.Name ~== "walktest")
+        {{
+            walkTest = 140;
+            walkPhase = -1;
+            Console.Printf("P2W WALKTEST begin at x=%.0f y=%.0f", p.mo.pos.x, p.mo.pos.y);
+        }}
+    }}
+
+    void WalkTestTick(PlayerInfo p)
+    {{
+        int phase = (140 - walkTest) / 35;
+        if (phase != walkPhase)
+        {{
+            if (walkPhase >= 0)
+            {{
+                double moved = (p.mo.pos.x - walkStartX, p.mo.pos.y - walkStartY).Length();
+                Console.Printf("P2W WALKTEST dir=%d moved=%.0f", walkPhase, moved);
+            }}
+            walkPhase = phase;
+            walkStartX = p.mo.pos.x;
+            walkStartY = p.mo.pos.y;
+        }}
+        double a = 90.0 * phase;
+        p.mo.vel.x = cos(a) * 8;
+        p.mo.vel.y = sin(a) * 8;
+        walkTest--;
+        if (walkTest == 0)
+        {{
+            double moved = (p.mo.pos.x - walkStartX, p.mo.pos.y - walkStartY).Length();
+            Console.Printf("P2W WALKTEST dir=%d moved=%.0f", walkPhase, moved);
+            Console.Printf("P2W WALKTEST end at x=%.0f y=%.0f", p.mo.pos.x, p.mo.pos.y);
+        }}
     }}
 
     // ---- edge transitions -----------------------------------------------
@@ -309,6 +358,7 @@ class PostcodeHUD : StaticEventHandler
         // Telemetry before any early-out: it must keep reporting exactly when
         // movement is broken, which is when everything else here bails.
         TelemetryTick(p);
+        if (walkTest > 0) WalkTestTick(p);
 
         if (p.mo.health <= 0) return;
         if (cooldown > 0) {{ cooldown--; return; }}
