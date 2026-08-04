@@ -196,6 +196,24 @@ function tlmWatch(line) {
 
 let chosenScale = qs.get('scale') || '';
 
+// Without pointer lock the OS cursor stays live and mouse-look stops at the
+// window edge — DOM mouse events are bounded by the window. The browser only
+// grants the lock from a user gesture on the element, so: click the canvas
+// to capture, Esc releases (browser-enforced), click again to recapture.
+// Mirrors the upstream loader, whose comment describes this exact symptom.
+let booted = false;
+const canvasEl = document.getElementById('canvas');
+canvasEl.addEventListener('click', () => {
+  if (!booted || document.pointerLockElement === canvasEl) return;
+  if (canvasEl.requestPointerLock) canvasEl.requestPointerLock();
+});
+document.addEventListener('pointerlockchange', () => {
+  if (booted && !document.pointerLockElement) {
+    statusEl.textContent = 'mouse released — click to recapture';
+    setTimeout(() => { if (!document.pointerLockElement) statusEl.textContent = ''; }, 3000);
+  }
+});
+
 function boot(args, pkg, files) {
   statusEl.textContent = 'booting…';
   window.Module = {
@@ -208,6 +226,11 @@ function boot(args, pkg, files) {
       statusEl.textContent = '';
       try {
         Module.callMain(args);
+        booted = true;
+        statusEl.textContent = 'click the game to capture the mouse';
+        setTimeout(() => {
+          if (statusEl.textContent.startsWith('click')) statusEl.textContent = '';
+        }, 5000);
       } catch (e) {
         if (!(e && e.name === 'ExitStatus') && !String(e).includes('unwind')) {
           say('callMain threw: ' + e, 'e');
@@ -232,6 +255,8 @@ function boot(args, pkg, files) {
 }
 
 function showExited(msg) {
+  booted = false;  // stop the canvas click handler re-capturing over the overlay
+  if (document.pointerLockElement) document.exitPointerLock();
   hopEl.style.display = 'none';
   const o = document.createElement('div');
   o.id = 'exited';
