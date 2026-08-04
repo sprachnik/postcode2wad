@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>postcode2wad — walk real Britain in Doom</title>
+<style>
+  :root{--bg:#0b0b0c;--panel:#131316;--border:#2a2a30;--text:#dcdcdc;
+        --dim:#8a8a92;--accent:#c44;--sea:#10141c}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);
+            font:13px ui-monospace,Consolas,monospace}
+  header{padding:26px 20px 10px;max-width:980px;margin:0 auto}
+  h1{margin:0;font-size:20px;letter-spacing:2px;color:var(--accent)}
+  h1 small{display:block;color:var(--dim);font-size:11px;letter-spacing:1px;
+           margin-top:6px;font-weight:400}
+  .intro{color:var(--dim);max-width:640px;line-height:1.6;font-size:12px}
+  #districts{max-width:980px;margin:0 auto;padding:0 20px;display:flex;
+             gap:8px;flex-wrap:wrap}
+  #districts button{background:var(--panel);color:var(--dim);
+                    border:1px solid var(--border);padding:6px 14px;
+                    cursor:pointer;font:inherit}
+  #districts button.on{color:#fff;border-color:var(--accent);
+                       background:#742828}
+  #mapwrap{max-width:980px;margin:14px auto;padding:0 20px;overflow-x:auto}
+  #grid{display:grid;gap:2px;background:var(--sea);padding:8px;
+        border:1px solid var(--border);width:max-content}
+  .tile{position:relative;width:44px;height:44px;padding:0;border:0;
+        cursor:pointer;background-size:cover;background-color:#1a1a1e;
+        image-rendering:pixelated;display:block}
+  .tile:hover{outline:2px solid var(--accent);z-index:2}
+  .sea{width:44px;height:44px;background:var(--sea)}
+  #tip{position:fixed;pointer-events:none;background:var(--panel);
+       border:1px solid var(--border);padding:8px 10px;z-index:10;
+       display:none;line-height:1.5;font-size:11px}
+  #tip .t{color:var(--text)}
+  #tip .d{color:var(--dim)}
+  footer{max-width:980px;margin:30px auto;padding:16px 20px 40px;
+         color:var(--dim);font-size:11px;line-height:1.7;
+         border-top:1px solid var(--border)}
+  footer a{color:#9ab}
+  .k{color:var(--text)}
+</style>
+</head>
+<body>
+<header>
+  <h1>REAL BRITAIN, AS DOOM LEVELS<small id="sub">postcode2wad</small></h1>
+  <p class="intro">Every square below is 800&nbsp;m of real England, generated
+  from Environment&nbsp;Agency 1&nbsp;m LIDAR and OpenStreetMap: real building
+  footprints at measured heights, sloped terrain, hedges, trees. Click a
+  square to walk it. <span class="k">WASD</span> moves, mouse looks; desktop
+  only. Dark squares are the sea.</p>
+</header>
+
+<div id="districts"></div>
+<div id="mapwrap"><div id="grid"></div></div>
+<div id="tip"></div>
+
+<footer id="credits">
+  Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
+  contributors (ODbL). Terrain: &copy; Environment Agency copyright and/or
+  database right 2022, <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">OGL v3</a>.
+  Geocoding contains OS data &copy; Crown copyright and database right.<br>
+  Engine: <a href="https://github.com/UZDoom/UZDoom">UZDoom</a> via the
+  <a href="https://github.com/abootnet/uzdoom-wasm">uzdoom-wasm</a> port, both
+  GPLv3 &mdash; source at those links. Game assets:
+  <a href="https://freedoom.github.io/">Freedoom</a> (modified BSD).
+  Each level embeds its own ATTRIBUTION.txt.<br>
+  Generator: <span class="k">postcode2wad</span> &mdash; type a UK postcode,
+  get a playable GZDoom level of that real place.
+</footer>
+
+<script>
+const tip = document.getElementById('tip');
+const grid = document.getElementById('grid');
+const tabs = document.getElementById('districts');
+const sub = document.getElementById('sub');
+
+async function showDistrict(slug) {
+  const m = await (await fetch(slug + '/manifest.json')).json();
+  const t = m.tiles;
+  const ixs = t.map(x => x.ix), iys = t.map(x => x.iy);
+  const x0 = Math.min(...ixs), x1 = Math.max(...ixs);
+  const y0 = Math.min(...iys), y1 = Math.max(...iys);
+  grid.innerHTML = '';
+  grid.style.gridTemplateColumns = `repeat(${x1 - x0 + 1}, 44px)`;
+
+  const byPos = new Map(t.map(x => [x.ix + ',' + x.iy, x]));
+  // Row order runs north to south, so the map reads like a map: iy grows
+  // northward in the national grid, screen rows grow downward.
+  for (let iy = y1; iy >= y0; iy--) {
+    for (let ix = x0; ix <= x1; ix++) {
+      const tile = byPos.get(ix + ',' + iy);
+      if (!tile) {
+        const s = document.createElement('div');
+        s.className = 'sea';
+        grid.appendChild(s);
+        continue;
+      }
+      const b = document.createElement('a');
+      b.className = 'tile';
+      b.href = 'play.html?d=' + encodeURIComponent(slug)
+             + '&tile=' + encodeURIComponent(tile.id);
+      b.style.backgroundImage = `url(${slug}/minimaps/${tile.id}.png)`;
+      b.addEventListener('mousemove', ev => {
+        tip.style.display = 'block';
+        tip.style.left = Math.min(ev.clientX + 14, innerWidth - 190) + 'px';
+        tip.style.top = (ev.clientY + 14) + 'px';
+        tip.innerHTML = '<div class="t">' + tile.title + '</div>'
+          + '<div class="d">' + tile.buildings + ' buildings &middot; '
+          + tile.trees + ' trees &middot; '
+          + ((tile.bytes + m.common_bytes) / 1e6).toFixed(1) + ' MB</div>';
+      });
+      b.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      grid.appendChild(b);
+    }
+  }
+  sub.textContent = m.district + ' — ' + t.length + ' playable squares';
+}
+
+fetch('districts.json').then(r => r.json()).then(listing => {
+  const ds = listing.districts;
+  for (const d of ds) {
+    const b = document.createElement('button');
+    b.textContent = d.name + ' (' + d.tiles + ')';
+    b.onclick = () => {
+      tabs.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      showDistrict(d.slug);
+    };
+    tabs.appendChild(b);
+  }
+  if (ds.length) tabs.firstChild.click();
+  if (ds.length < 2) tabs.style.display = 'none';
+});
+</script>
+</body>
+</html>

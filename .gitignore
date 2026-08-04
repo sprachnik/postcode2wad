@@ -23,6 +23,9 @@ out/
 # hundreds of tile zips; they exist so a multi-hour run can resume, not to be
 # kept. Delete the directory to force a full rebuild.
 work/
+# Web-demo output from scripts/build-webdemo.py: ~250 MB of engine, IWAD and
+# per-tile PK3s, all reproducible from work/ artifacts plus the engine mirror.
+site/
 # Bulk source data: the Geofabrik .osm.pbf and the 5km LIDAR mirror. Kent's
 # terrain alone is ~10 GB of GeoTIFF, fetched by scripts/fetch-lidar.py.
 data/

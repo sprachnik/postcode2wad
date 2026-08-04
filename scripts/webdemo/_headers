@@ -1,0 +1,8 @@
+# The engine is threaded (pthreads -> SharedArrayBuffer), and browsers only
+# grant SharedArrayBuffer to cross-origin-isolated pages. Both headers must
+# arrive on every response, including the .wasm and the 57 MB data package —
+# without them the symptom is a black canvas, not an error naming headers.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: cross-origin
