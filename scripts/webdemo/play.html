@@ -263,7 +263,11 @@ function showExited(msg) {
     return;
   }
 
-  const args = ['-iwad', '/freedoom2.wad', '-file', ...fileArgs, '+map', MAP];
+  const args = ['-iwad', '/freedoom2.wad', '-file', ...fileArgs, '+map', MAP,
+                // Hide the on-screen console echo (the P2W TLM telemetry
+                // lines land there every second or so). Display only: they
+                // still reach stdout, which the neighbour-hop watcher reads.
+                '+con_notifylines', '0'];
   if (qs.get('fps') === '1') args.push('+vid_fps', '1');
   const cmds = qs.get('cmd');
   if (cmds) for (const c of cmds.split(',')) {
