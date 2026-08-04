@@ -1,6 +1,8 @@
 # Postcode → WAD — Project Brief
 
-**Date:** 2026-08-02 · **Status:** Greenfield, prior-art check clear
+**Date:** 2026-08-02 · **Status:** Greenfield. *(Prior art was **not**
+clear — see [`prior-art.md`](prior-art.md). The "why" below is left as written on 2 Aug
+and is wrong on first-mover; it is kept for the record.)*
 **One-liner:** Type any UK postcode, get a playable GZDoom level of that real place, generated from DEFRA LIDAR terrain + building footprints. "Arnis, but for Doom."
 
 ## Why this is worth doing
