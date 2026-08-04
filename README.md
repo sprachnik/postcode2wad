@@ -50,7 +50,34 @@ each tile edge, and a ZScript HUD carries a minimap, compass and live lat/lng:
 postcode2wad "CT1 2EH" --size 800 --region 1 --out out/birchington-area.pk3
 ```
 
-Still to come: street-name signs, and a parallel build harness for county-scale runs.
+A whole local authority district goes in one PK3, built in parallel:
+
+```
+python scripts/build-district.py --district Thanet --size 800 --workers 8 --out out/thanet.pk3
+```
+
+Thanet is **200 tiles at 800m — 103 km² of Kent coast, 1.47M sectors, 111 MB —
+in 28.5 minutes** on 8 workers, with no failures. Tiles come from the ONS district
+polygon rather than a bounding box, one subprocess builds each one, and every finished
+tile is a resumable artifact on disk, so a run measured in hours cannot lose everything
+to a single bad tile. Packs of more than 99 maps are named `M0001`.. rather than
+`MAP01`, which lifts the ceiling to 9,999.
+
+**And all of it is playable in a browser: [doomearth.clawhangout.com](https://doomearth.clawhangout.com).**
+Pick any of Thanet's 200 tiles off a minimap grid, choose a performance mode, spawn on
+it, and walk to a tile edge to cross into the neighbour — the launcher reads the HUD's
+telemetry off the engine's console stream and loads the next tile when you push into
+the boundary. The engine is [uzdoom-wasm](https://github.com/abootnet/uzdoom-wasm)
+(UZDoom under Emscripten); the site is nothing but static files on Cloudflare R2.
+`scripts/build-webdemo.py` assembles it from district artifacts, and
+[`docs/web-demo.md`](docs/web-demo.md) records what it took — four boot failures that
+all presented as the same black screen, and the FPS measurement that decided single
+tiles over region packs.
+
+Still to come: street-name signs, and a bulk DSM mirror for eastern Kent — the district
+run above is network-bound, not CPU-bound, because the Environment Agency's bulk 1m DSM
+is missing for the whole TR grid square (see [`docs/lidar-bulk.md`](docs/lidar-bulk.md)).
+
 See [`TODO.md`](TODO.md) for the working list — including the known rough edges —
 [`CLAUDE.md`](CLAUDE.md) for how to work on it without repeating old mistakes, and
 [`docs/brief.md`](docs/brief.md) for the full brief and milestones.

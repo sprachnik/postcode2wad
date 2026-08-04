@@ -117,27 +117,57 @@ making the number better.
 
 Fuller list in [`TODO.md`](TODO.md); this is the ordering and the reasoning.
 
-**1. Parallel build harness — the only thing blocking Kent.**
-Data is no longer the constraint: OSM is 3ms a tile off a local `.osm.pbf`, and
-LIDAR is a local 5km mirror. What is left is ~70s of *geometry* per 800m tile,
-which is CPU-bound and embarrassingly parallel. Kent is 5,837 tiles ≈ 114 hours
-serial, ~14 across 8 cores. Needs per-tile isolation, resumability and a
-progress/failure log — a run that long must not lose everything to one bad tile.
+**1. Mirror the 1m DSM for the TR square — this is what actually blocks
+eastern Kent, and it is not the harness.**
 
-Do not repeat this mistake: the LIDAR mirror was expected to cut per-tile time
-and did not, because the 76s baseline was measured against a *warm* WCS cache,
-which is already a local file read. Terrain was 13ms of those 76 seconds. The
-mirror's real value is the cold path and 11,686 round trips (~7.5 hours for
-Kent), not per-tile speed.
+`scripts/build-district.py` exists and works: Thanet, 200 tiles at 800m, 28.5
+minutes, 0 failures, 111 MB, `M0001`..`M0200`, 0 one-sided lines across all 200
+maps. Subprocess per tile, resumable from artifacts on disk, progress and
+failure logs.
+
+But **the Thanet run was network-bound, not CPU-bound**, and the "~70s of
+geometry per tile" figure this file used to carry was wrong. Measured by
+building the same 16 tiles twice — density-spread from 37 to 32,290 sectors,
+same 8 workers, once cold and once with the LIDAR cache warm:
+
+| | cold | warm |
+| --- | --- | --- |
+| median tile | ~66s | ~5s |
+| mean | 71s | 11.4s |
+| densest (32,290 sectors) | 139s | 75.5s |
+
+So ~55s of every 66s tile was the WCS DSM fetch. One serial WCS request is
+2-3s, but eight concurrent ones queue to ~8s each, which is why 200 tiles took
+28.5 minutes (200 x 8s ≈ 27) while the geometry in them was about 5. **Adding
+cores will not speed up TR.** The EA's bulk DSM is a metadata-only zip for
+every TR tile — Thanet, Canterbury, Dover — so those three districts fetch DSM
+over the network one round trip per tile. `docs/lidar-bulk.md` §5 has the three
+ways out; mirroring the DSM from the WCS in 5km blocks preserves output
+exactly.
+
+Geometry *is* superlinear in sector count (37 sectors → 1.4s, 32,290 → 75.5s),
+so dense town tiles are genuinely CPU-heavy. It is the median tile that is not.
+
+TQ has a working bulk DSM, so western Kent should be CPU-bound and much
+faster — but that is an inference from the packaging defect's extent, not a
+measurement. Measure a TQ district before sizing Kent.
 
 **2. Download the rest of Kent's LIDAR** (~10 GB; only Thanet's 12 squares and
 2 TQ squares are mirrored). Left as a human decision deliberately.
 
 **3. The beach is the choppiest surface on the map and nothing has touched it.**
-DMSAND: p50 6.9°, p95 31.8°, unchanged by the road work — sand is not an
-engineered surface so the centreline trick does not apply. This is the one part
-of a player's seafront report that remains unanswered. Measure with
-`scripts/flatness.py`.
+Confirmed at district scale, so it is not a Birchington artefact: across all 200
+Thanet tiles DMSAND is p50 4.6°, p95 29.1°, p99 55.9° on 21,758 joins — the
+worst p50 *and* p95 of any surface. (Birchington alone read p50 6.9, p95 31.8.)
+Sand is not an engineered surface so the centreline trick does not apply. This
+is the one part of a player's seafront report that remains unanswered, and
+Thanet is nothing but seafront. Measure with `scripts/flatness.py`.
+
+The same run confirmed the road work generalises: DMTARMAC p50 0.1°, p95 3.6°
+across 197,607 joins over 200 tiles, having only ever been measured on one
+region before. Note every material has a max above 75° — a thin district-wide
+tail of degenerate joins, consistent with the known sliver defect. It is a
+tail, not a median; do not chase it with a rule that moves the median.
 
 **4. Multiplayer** is untested and needs no code — see
 [`docs/multiplayer-test.md`](docs/multiplayer-test.md), half an hour. The real

@@ -46,6 +46,46 @@ anything console-shaped goes in as `+cmd` argv via URL params (`?fps=1`,
 `?scale=0.5`, `?cmd=netevent walktest`). And the engine must boot behind a
 user gesture (the performance-mode buttons are that gesture).
 
+## The second wave: findings from the first real player
+
+- **Pointer lock must be requested, per gesture, by us.** Without it the OS
+  cursor stays live and mouse-look stops dead at the window edge. Click the
+  canvas captures; Esc releases (browser-enforced); click recaptures. The
+  upstream loader has the same handler with a comment describing the exact
+  symptom.
+- **The engine's fullscreen shows only the canvas element**, so every DOM
+  overlay — banners, buttons, hints — is invisible by construction. Anything
+  that must be visible in fullscreen has to be drawn by the engine itself
+  (i.e. the ZScript HUD), or not matter.
+- **Quitting from the engine menu ends the wasm runtime**; without a
+  `Module.onExit` hook the page is just dead. It now shows
+  back-to-map / play-again, and `onAbort` routes to the same overlay.
+- **The console echo is hidden** (`+con_notifylines 0`): the HUD's telemetry
+  printed to the top of the screen once a second. Display only — the lines
+  still reach stdout.
+- **Stale pages look like broken deployments.** `play.html` changed four
+  times on launch day, and twice the report of a bug was a browser cache
+  serving the previous version. Pages/manifests cache 15 min at the edge,
+  5 min in browsers, precisely so this window stays small.
+
+## Crossing tile edges
+
+Single-tile PK3s cannot transition in-engine — the neighbour is a different
+file, and the engine cannot be handed a new file mid-run. (This confused even
+us on launch day: transitions "worked locally" because the local test was
+`margate.pk3`, a 9-map region pack. Same engine, different content.)
+
+The replacement uses a channel that already existed: the HUD prints
+`P2W TLM map=… x=… y=…` telemetry to the console, and the launcher *is* the
+console. It watches the stream against the district manifest: within 25m of
+an edge whose neighbour exists, a banner names what's ahead; within 4m the
+page navigates to the neighbour itself. Armed only after the player has been
+seen clear of every edge once, so arriving on a tile whose spawn sits near a
+border cannot ping-pong straight back. The chosen performance mode carries
+across; position does not (you arrive at the neighbour's spawn) — it is a
+crossing, not a seam. Telemetry built for "I got stuck here" bug reports
+became the navigation system.
+
 ## Performance: measured, CPU-bound
 
 On the Margate 3×3 in Chrome (Ryzen 3800X / RTX 3090): **9 FPS at full
@@ -105,13 +145,24 @@ there is more than one. The rest of Kent is `build-district.py` then
 | GitHub Pages | 100 MiB | **none** — needs coi-serviceworker hack | 100 GB soft |
 
 R2 traffic economics: storage 0.25 GB of a free 10; egress free; reads
-$0.36/million past 10M/month (~50k visitors, mostly the 200 minimap fetches
-per index view). The realistic viral-month bill is single-digit dollars, and a
-cache rule on the zone would cut reads further. The `r2.dev` preview URL is
-rate-limited and cannot take the header rules — the custom domain is
-mandatory, and the two Transform Rules (COOP/COEP headers; `/` →
-`/index.html`, which R2 does not do itself) live on the *zone*, not the
-bucket.
+$0.36/million past 10M/month (~47k visitors uncached, mostly the 200 minimap
+fetches per index view). The realistic viral-month bill is single-digit
+dollars. The `r2.dev` preview URL is rate-limited and cannot take the header
+rules — the custom domain is mandatory, and all the rules live on the *zone*,
+not the bucket:
+
+- **Transform Rules** ×2: the COOP/COEP/CORP headers, and `/` →
+  `/index.html` (R2 has no index documents).
+- **Cache Rules** ×2, order matters — *last matching rule wins*, so the
+  host-wide short rule (15 min edge / 5 min browser, so deploys land) comes
+  first and the long rule for `/engine/`, `/tiles/`, `/minimaps/`,
+  `common.pk3` (30 days / 1 day) comes second. Verified `cf-cache-status:
+  HIT` on the 57 MB data package: repeat traffic never touches the bucket,
+  so no meter on the site scales with popularity.
+
+Deploying is `python scripts/build-webdemo.py …` then
+`rclone sync site r2:doommap` (rclone remote configured against the bucket's
+S3 endpoint with an R2 API token scoped to the one bucket).
 
 ## Licensing
 
