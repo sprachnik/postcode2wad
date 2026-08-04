@@ -2,11 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Without this a phone lays the page out at 980px and then scales it down,
+     so the canvas is a postage stamp and every control is off the edge. -->
+<meta name="viewport" content="width=device-width,initial-scale=1,
+      maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>postcode2wad — loading tile</title>
 <style>
   html,body{margin:0;height:100%;background:#0b0b0c;color:#dcdcdc;
-            font:12px ui-monospace,Consolas,monospace;overflow:hidden}
-  #canvas{display:block;width:100vw;height:100vh;background:#000;outline:0}
+            font:12px ui-monospace,Consolas,monospace;overflow:hidden;
+            /* Otherwise a drag to look pans the page and a two-finger move
+               zooms it, both of which fight the controls below. */
+            touch-action:none;overscroll-behavior:none;
+            -webkit-user-select:none;user-select:none}
+  #canvas{display:block;width:100vw;height:100vh;background:#000;outline:0;
+          touch-action:none}
+  /* dvh follows the mobile browser's collapsing URL bar; vh does not, so the
+     bottom of the canvas sits under it for the first scroll. */
+  @supports (height:100dvh){#canvas{height:100dvh}}
   #log{position:fixed;left:0;bottom:0;width:100%;max-height:40vh;overflow-y:auto;
        background:rgba(0,0,0,.82);border-top:1px solid #2a2a30;padding:8px 10px;
        white-space:pre-wrap;line-height:1.45;z-index:5;display:none}
@@ -49,6 +61,28 @@
   #exited a{color:#fff;background:#742828;border:1px solid #c44;
             padding:10px 20px;text-decoration:none}
   #exited a:hover{background:#c44}
+
+  /* ---- touch controls ---------------------------------------------------
+     Shown only on a coarse pointer, and only once the engine is up. The whole
+     layer is transparent to sight and opaque to touch: it has to swallow the
+     gestures itself, because the engine's own touch handling is SDL's, which
+     Doom does not read. */
+  #touch{position:fixed;inset:0;z-index:6;display:none;touch-action:none}
+  #stick{position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;
+         border:2px solid rgba(220,220,220,.34);border-radius:50%;
+         background:rgba(11,11,12,.28);display:none}
+  #knob{position:absolute;left:50%;top:50%;width:52px;height:52px;
+        margin:-26px 0 0 -26px;border-radius:50%;
+        background:rgba(204,68,68,.5);border:2px solid rgba(230,230,230,.5)}
+  .tbtn{position:absolute;background:rgba(19,19,22,.62);color:#dcdcdc;
+        border:1px solid rgba(204,68,68,.75);border-radius:50%;
+        width:74px;height:74px;font:inherit;font-size:11px;letter-spacing:1px;
+        display:flex;align-items:center;justify-content:center}
+  .tbtn.on{background:#742828;color:#fff}
+  #useBtn{right:18px;bottom:104px}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
+        z-index:7;color:#8a8a92;background:rgba(11,11,12,.7);padding:6px 12px;
+        display:none;text-align:center;line-height:1.5}
 </style>
 </head>
 <body>
@@ -62,6 +96,11 @@
   <button data-scale="0.75"><b>BALANCED</b><span>75% render scale, sharper than it sounds</span></button>
   <button data-scale="0.5"><b>PERFORMANCE</b><span>half resolution — for slower machines</span></button>
 </div>
+<div id="touch">
+  <div id="stick"><div id="knob"></div></div>
+  <button id="useBtn" class="tbtn">USE</button>
+</div>
+<div id="hint"></div>
 <div id="log"></div>
 <button id="hide">log</button>
 
@@ -97,6 +136,47 @@ const MAP  = qs.get('map') || 'MAP01';
 const CORE = ['engine/uzdoom.pk3', 'engine/game_support.pk3',
               'engine/brightmaps.pk3', 'engine/lights.pk3',
               'engine/game_widescreen_gfx.pk3'];
+
+// Cache-buster for the two PK3s, and the only thing that makes a rebuild
+// visible. The host caches `/tiles/` and `common.pk3` for **30 days at the
+// edge** because their contents are immutable for a given build — but they
+// are not immutable across builds, and a rebuild reuses every URL. Without a
+// changed request, a player whose edge has the old tile would keep playing it
+// for a month while the bucket held the new one, and nothing anywhere would
+// look wrong. `play.html` itself is on the short rule, so bumping this
+// propagates in 15 minutes. **Bump it whenever the tile PK3s change.**
+const PK3_V = '20260804b';
+
+// URL parameter -> the cvar the PK3's CVARINFO declares for it. Names must
+// match hud.py's ENTRY_CVARS exactly; a typo here is silent, because a
+// crossing that loses its entry position just spawns you normally.
+const ENTRY_CVARS = [
+  ['ex', 'p2w_entry_x'], ['ey', 'p2w_entry_y'], ['ez', 'p2w_entry_z'],
+  ['ea', 'p2w_entry_ang'], ['edir', 'p2w_entry_dir'],
+];
+
+// **Nothing below may be sent negative.** GZDoom starts a new command-line
+// parameter at any argument beginning with "-", so a negative value is not
+// read as a value at all: the `set` before it silently gets none and the cvar
+// keeps its default. Measured, on a real launch — `+set p2w_entry_z -400`
+// left the cvar at -1, with nothing in the log. Hence a compass index rather
+// than the (dx, dy) the engine-side transition uses, and hence the bias on z,
+// which is the one value that legitimately goes below zero (ground here is at
+// absolute ordnance-datum height and Kent has plenty of it below datum).
+const DIR_CODE = { north: 1, south: 2, east: 3, west: 4 };
+const Z_BIAS = 65536;   // must equal ENTRY_Z_BIAS in hud.py
+
+// ?weapon=… — `fist` is a hand and nothing else, `none` strips every weapon
+// for an empty-handed walk, `keep` gives back the stock Doom loadout. Carried
+// across tile crossings so a choice survives a seam.
+//
+// The default is set *here* rather than left to the PK3's CVARINFO, even
+// though that has the same default, because the two are not equally cheap to
+// change: this file rolls out in 15 minutes, and the cvar's own default is
+// baked into 200 PK3s that take a district rebuild and a 112 MB upload to
+// change. Same value, one of them reversible over lunch.
+const WEAPON_MODES = { none: '0', fist: '1', keep: '2' };
+const WEAPON = qs.get('weapon') || 'fist';
 
 const logEl = document.getElementById('log');
 const bar = document.getElementById('bar');
@@ -165,7 +245,11 @@ const hopEl = document.createElement('div');
 hopEl.id = 'hop';
 document.body.appendChild(hopEl);
 
-const TLM_RE = /P2W TLM \S+ x=(-?\d+) y=(-?\d+)/;
+// z and the heading come along because the arrival needs them: the ZScript
+// rejects a landing spot whose floor is more than 5m from the one you left
+// (that is what tells a street apart from the roof beside it), and walking
+// through a seam only feels continuous if you are still facing the same way.
+const TLM_RE = /P2W TLM \S+ x=(-?\d+) y=(-?\d+) z=(-?\d+) .*?ang=(-?\d+)/;
 const EDGE_SHOW = 800;  // 25m out: show where the edge leads
 const EDGE_GO = 128;    // 4m out: you are pushing into the boundary — cross
 
@@ -176,16 +260,39 @@ const EDGE_GO = 128;    // 4m out: you are pushing into the boundary — cross
 let hopArmed = false;
 let hopping = false;
 
-function hopUrl(n) {
-  return 'play.html?d=' + encodeURIComponent(D)
-       + '&tile=' + encodeURIComponent(n.id)
-       + (chosenScale ? '&scale=' + chosenScale : '');
+// Where the player was on the last telemetry line, and which way they were
+// facing. Carried into the next page as the entry position — the crossing is a
+// new process, so this is the only thing that survives it.
+let lastTlm = null;
+
+// The mirroring itself (arrive REENTRY inside the far edge, keep the
+// coordinate that runs along the seam) is deliberately NOT done here: the
+// ZScript does it, from the same constants the in-engine region transition
+// uses. Two copies of that rule in two languages is how the two ends drift
+// apart without either looking wrong.
+function hopUrl(n, dir) {
+  let u = 'play.html?d=' + encodeURIComponent(D)
+        + '&tile=' + encodeURIComponent(n.id)
+        + (chosenScale ? '&scale=' + chosenScale : '')
+        + (WEAPON ? '&weapon=' + encodeURIComponent(WEAPON) : '');
+  if (lastTlm) {
+    // Clamped and biased so every one of these is non-negative; see DIR_CODE.
+    u += '&ex=' + Math.max(0, lastTlm.x) + '&ey=' + Math.max(0, lastTlm.y)
+       + '&ez=' + (lastTlm.z + Z_BIAS) + '&ea=' + lastTlm.ang
+       + '&edir=' + DIR_CODE[dir];
+  }
+  return u;
 }
 
 function tlmWatch(line) {
   const m = TLM_RE.exec(line);
-  if (!m || !hopInfo || hopping) return;
+  if (!m) return;
   const x = +m[1], y = +m[2];
+  // Recorded before the manifest check: the position is what a crossing
+  // carries, and the manifest fetch can still be in flight while the player is
+  // already walking.
+  lastTlm = { x, y, z: +m[3], ang: ((+m[4] % 360) + 360) % 360 };
+  if (!hopInfo || hopping) return;
   const u = hopInfo.units, me = hopInfo.me;
   // y grows northward, x eastward (matches the OSGB grid the tiles live on).
   const dirs = [
@@ -194,8 +301,12 @@ function tlmWatch(line) {
   ];
   if (!hopArmed && dirs.every(([, , , d]) => d > EDGE_SHOW)) hopArmed = true;
 
+  // Nothing is offered until the crossing is armed, and arriving now lands you
+  // 6m inside the edge you came through: without this the first thing every
+  // crossing shows is a banner pointing back at the tile you just left, over a
+  // seam that is deliberately refusing to fire.
   const offers = [];
-  for (const [name, dx, dy, dist] of dirs) {
+  for (const [name, dx, dy, dist] of (hopArmed ? dirs : [])) {
     if (dist > EDGE_SHOW) continue;
     const n = hopInfo.byPos.get((me.ix + dx) + ',' + (me.iy + dy));
     if (!n) continue;
@@ -203,7 +314,7 @@ function tlmWatch(line) {
       hopping = true;
       hopEl.innerHTML = '<a>Entering <b>' + n.title + '</b>&hellip;</a>';
       hopEl.style.display = 'flex';
-      location.href = hopUrl(n);
+      location.href = hopUrl(n, name);
       return;
     }
     offers.push([name, n]);
@@ -211,7 +322,7 @@ function tlmWatch(line) {
   hopEl.innerHTML = '';
   for (const [name, n] of offers) {
     const a = document.createElement('a');
-    a.href = hopUrl(n);
+    a.href = hopUrl(n, name);
     a.innerHTML = 'Ahead ' + name + ': <b>' + n.title + '</b> — keep walking to cross';
     hopEl.appendChild(a);
   }
@@ -219,6 +330,11 @@ function tlmWatch(line) {
 }
 
 let chosenScale = qs.get('scale') || '';
+
+// A phone has no pointer to lock and no keyboard to press. Coarse pointer AND
+// a touch digitiser: a touchscreen laptop reports maxTouchPoints without being
+// one of these, and it still has both.
+const TOUCH = matchMedia('(pointer: coarse)').matches && navigator.maxTouchPoints > 0;
 
 // Without pointer lock the OS cursor stays live and mouse-look stops at the
 // window edge — DOM mouse events are bounded by the window. The browser only
@@ -228,7 +344,7 @@ let chosenScale = qs.get('scale') || '';
 let booted = false;
 const canvasEl = document.getElementById('canvas');
 canvasEl.addEventListener('click', () => {
-  if (!booted || document.pointerLockElement === canvasEl) return;
+  if (TOUCH || !booted || document.pointerLockElement === canvasEl) return;
   if (canvasEl.requestPointerLock) canvasEl.requestPointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
@@ -237,6 +353,164 @@ document.addEventListener('pointerlockchange', () => {
     setTimeout(() => { if (!document.pointerLockElement) statusEl.textContent = ''; }, 3000);
   }
 });
+
+// ---- touch controls ------------------------------------------------------
+//
+// The engine is a wasm build of a desktop game: it reads keyboard and mouse.
+// SDL registers touch handlers (they are in uzdoom.js) but a desktop Doom has
+// nothing bound to a finger, and the report from a phone was that the game
+// boots and then cannot be played. So rather than hope, speak the language it
+// definitely understands — synthesise the key and mouse events it is already
+// listening for. Everything below uses GZDoom's *default* bindings on purpose:
+// the console is unreachable in a browser (the backquote key never arrives),
+// so there is no way to bind anything of our own.
+//
+// Dispatched on the canvas with bubbles:true, which reaches handlers on the
+// canvas, the document and the window — the emscripten build registers on one
+// of those three and an event dispatched at the wrong one is simply not seen.
+const KEYS = {
+  fwd:   ['KeyW', 87, 'w'],
+  back:  ['KeyS', 83, 's'],
+  left:  ['KeyA', 65, 'a'],       // default WASD strafes; turning is the drag
+  right: ['KeyD', 68, 'd'],
+  turnL: ['ArrowLeft', 37, 'ArrowLeft'],
+  turnR: ['ArrowRight', 39, 'ArrowRight'],
+  use:   ['Space', 32, ' '],
+};
+const held = new Set();
+
+function setKey(name, down) {
+  if (down === held.has(name)) return;   // the engine sees edges, not levels
+  if (down) held.add(name); else held.delete(name);
+  const [code, keyCode, key] = KEYS[name];
+  // `code` is the field SDL maps to a scancode; keyCode/which are filled in as
+  // well because they are what older builds read, and neither costs anything.
+  canvasEl.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', {
+    key, code, keyCode, which: keyCode,
+    bubbles: true, cancelable: true, composed: true,
+  }));
+}
+
+// movementX in the constructor is a legacy extension rather than part of
+// MouseEventInit, so it is feature-detected rather than assumed: where it is
+// missing, looking around falls back to holding the turn keys, which is worse
+// but is never nothing.
+const MOVEMENT_OK = (() => {
+  try { return new MouseEvent('mousemove', { movementX: 7 }).movementX === 7; }
+  catch (e) { return false; }
+})();
+
+let virtX = window.innerWidth / 2, virtY = window.innerHeight / 2;
+
+function look(dx, dy) {
+  if (!MOVEMENT_OK) {
+    // Turn by holding an arrow key for as long as the drag keeps pushing.
+    setKey('turnL', dx < -1.5);
+    setKey('turnR', dx > 1.5);
+    return;
+  }
+  // clientX/clientY move too: when the engine has not got a pointer lock (it
+  // cannot, on a phone) SDL derives the relative motion from the absolute
+  // position instead, so sending only movementX would arrive as no motion.
+  virtX = Math.max(0, Math.min(window.innerWidth, virtX + dx));
+  virtY = Math.max(0, Math.min(window.innerHeight, virtY + dy));
+  canvasEl.dispatchEvent(new MouseEvent('mousemove', {
+    movementX: dx, movementY: dy, clientX: virtX, clientY: virtY,
+    bubbles: true, cancelable: true, composed: true,
+  }));
+}
+
+const LOOK_X = 1.1, LOOK_Y = 0.8;   // drag pixels to mouse units
+const DEAD = 14, FULL = 58;         // stick deadzone and full-deflection radius
+
+function startTouchControls() {
+  const layer = document.getElementById('touch');
+  const stick = document.getElementById('stick');
+  const useBtn = document.getElementById('useBtn');
+  layer.style.display = 'block';
+
+  let moveId = null, moveOx = 0, moveOy = 0;
+  let lookId = null, lookX = 0, lookY = 0;
+
+  const release = () => ['fwd', 'back', 'left', 'right', 'turnL', 'turnR']
+    .forEach(k => setKey(k, false));
+
+  function aim(dx, dy) {
+    const clamp = v => Math.max(-FULL, Math.min(FULL, v));
+    dx = clamp(dx); dy = clamp(dy);
+    document.getElementById('knob').style.transform =
+      'translate(' + dx + 'px,' + dy + 'px)';
+    setKey('fwd', dy < -DEAD);
+    setKey('back', dy > DEAD);
+    setKey('left', dx < -DEAD);
+    setKey('right', dx > DEAD);
+  }
+
+  layer.addEventListener('touchstart', ev => {
+    // Indexed, not for..of: TouchList is only iterable in newer
+    // browsers, and the oldest phones are exactly the ones this is for.
+    for (let i = 0; i < ev.changedTouches.length; i++) {
+      const t = ev.changedTouches[i];
+      // Left of the split walks, right of it looks. Two fingers at once is the
+      // point: a phone player has to be able to do both.
+      if (t.clientX < window.innerWidth * 0.45 && moveId === null) {
+        moveId = t.identifier; moveOx = t.clientX; moveOy = t.clientY;
+        stick.style.left = moveOx + 'px';
+        stick.style.top = moveOy + 'px';
+        stick.style.display = 'block';
+      } else if (lookId === null) {
+        lookId = t.identifier; lookX = t.clientX; lookY = t.clientY;
+      }
+    }
+    ev.preventDefault();
+  }, { passive: false });
+
+  layer.addEventListener('touchmove', ev => {
+    for (let i = 0; i < ev.changedTouches.length; i++) {
+      const t = ev.changedTouches[i];
+      if (t.identifier === moveId) aim(t.clientX - moveOx, t.clientY - moveOy);
+      else if (t.identifier === lookId) {
+        look((t.clientX - lookX) * LOOK_X, (t.clientY - lookY) * LOOK_Y);
+        lookX = t.clientX; lookY = t.clientY;
+      }
+    }
+    ev.preventDefault();
+  }, { passive: false });
+
+  const end = ev => {
+    for (let i = 0; i < ev.changedTouches.length; i++) {
+      const t = ev.changedTouches[i];
+      if (t.identifier === moveId) {
+        moveId = null; stick.style.display = 'none';
+        document.getElementById('knob').style.transform = '';
+        release();
+      } else if (t.identifier === lookId) {
+        lookId = null;
+        setKey('turnL', false); setKey('turnR', false);
+      }
+    }
+    ev.preventDefault();
+  };
+  layer.addEventListener('touchend', end, { passive: false });
+  layer.addEventListener('touchcancel', end, { passive: false });
+
+  // Doors and switches. Its own listeners, stopping propagation, so pressing
+  // it does not also register as the start of a look drag.
+  const press = down => ev => {
+    ev.stopPropagation(); ev.preventDefault();
+    useBtn.classList.toggle('on', down);
+    setKey('use', down);
+  };
+  useBtn.addEventListener('touchstart', press(true), { passive: false });
+  useBtn.addEventListener('touchend', press(false), { passive: false });
+  useBtn.addEventListener('touchcancel', press(false), { passive: false });
+
+  const hint = document.getElementById('hint');
+  hint.innerHTML = 'left side: walk &middot; right side: look &middot; USE opens doors'
+    + (MOVEMENT_OK ? '' : '<br>(this browser turns with the drag, not the view)');
+  hint.style.display = 'block';
+  setTimeout(() => { hint.style.display = 'none'; }, 9000);
+}
 
 function boot(args, pkg, files) {
   statusEl.textContent = 'booting…';
@@ -251,10 +525,14 @@ function boot(args, pkg, files) {
       try {
         Module.callMain(args);
         booted = true;
-        statusEl.textContent = 'click the game to capture the mouse';
-        setTimeout(() => {
-          if (statusEl.textContent.startsWith('click')) statusEl.textContent = '';
-        }, 5000);
+        if (TOUCH) {
+          startTouchControls();
+        } else {
+          statusEl.textContent = 'click the game to capture the mouse';
+          setTimeout(() => {
+            if (statusEl.textContent.startsWith('click')) statusEl.textContent = '';
+          }, 5000);
+        }
       } catch (e) {
         if (!(e && e.name === 'ExitStatus') && !String(e).includes('unwind')) {
           say('callMain threw: ' + e, 'e');
@@ -301,9 +579,14 @@ function showExited(msg) {
     if (COMMON) want.push(COMMON);
     want.push(PK3);
     for (let i = 0; i < want.length; i++) {
+      const mine = want[i] === COMMON || want[i] === PK3;
+      // The version goes on the request, never on the name: the engine is
+      // handed these through its own filesystem, and a lump file called
+      // "x.pk3?v=…" is not a PK3 as far as it is concerned.
       const base = '/' + want[i].split('/').pop();
-      files[base] = new Uint8Array(await grabRaw(want[i]));
-      if (want[i] === COMMON || want[i] === PK3) fileArgs.push(base);
+      files[base] = new Uint8Array(
+        await grabRaw(mine ? want[i] + '?v=' + PK3_V : want[i], want[i]));
+      if (mine) fileArgs.push(base);
       bar.style.width = (40 + (i + 1) / want.length * 60) + '%';
     }
   } catch (err) {
@@ -317,6 +600,27 @@ function showExited(msg) {
                 // lines land there every second or so). Display only: they
                 // still reach stdout, which the neighbour-hop watcher reads.
                 '+con_notifylines', '0'];
+
+  // Arriving from the tile next door. These are the four numbers the in-engine
+  // region transition keeps in a field across a ChangeLevel; a page navigation
+  // has no fields to keep them in, so they come back through the command line
+  // and the ZScript reads them once in WorldLoaded. Integers only — this is a
+  // URL, and it is being spliced into an argv.
+  for (const [param, cvar] of ENTRY_CVARS) {
+    const v = qs.get(param);
+    if (v !== null && /^-?\d+$/.test(v)) args.push('+set', cvar, v);
+  }
+  // hasOwnProperty, not `in`: `in` walks the prototype chain, so ?weapon=
+  // constructor would splice a function into the engine's argv.
+  if (Object.prototype.hasOwnProperty.call(WEAPON_MODES, WEAPON)) {
+    args.push('+set', 'p2w_weapon', WEAPON_MODES[WEAPON]);
+  }
+  if (TOUCH) {
+    // A drag has to look up and down, and with freelook off the engine reads
+    // vertical mouse motion as walking. cl_run because an 800m tile is a long
+    // way at Doom's walking pace and a phone has no shift key.
+    args.push('+set', 'freelook', '1', '+set', 'cl_run', '1');
+  }
   if (qs.get('fps') === '1') args.push('+vid_fps', '1');
   const cmds = qs.get('cmd');
   if (cmds) for (const c of cmds.split(',')) {
@@ -335,6 +639,15 @@ function showExited(msg) {
   const modes = document.getElementById('modes');
   document.getElementById('modesTitle').textContent =
     'Enter ' + (TILE || PK3.split('/').pop());
+  if (TOUCH) {
+    // Measured on a desktop CPU, not a phone: a tile is CPU-bound in the wasm
+    // main thread, so a phone is the harder case by a distance. Steer, do not
+    // decide — the buttons are also the gesture the engine needs to boot.
+    const note = document.createElement('span');
+    note.style.color = '#8a8a92';
+    note.textContent = 'on a phone, start with PERFORMANCE';
+    modes.appendChild(note);
+  }
   modes.style.display = 'flex';
   for (const b of modes.querySelectorAll('button')) {
     b.onclick = () => {

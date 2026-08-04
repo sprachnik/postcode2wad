@@ -227,8 +227,15 @@ def main(argv: list[str] | None = None) -> int:
     listing["districts"].sort(key=lambda d: d["name"])
     dj_path.write_text(json.dumps(listing, indent=1), encoding="utf-8")
 
+    # `--engine-dir site/engine` is the obvious thing to type on a rebuild --
+    # the engine is already there and it is 103 MB -- and copying a file onto
+    # itself raises. It used to raise *after* the tiles were rebuilt and before
+    # the page templates were copied, which leaves the site subtly stale rather
+    # than failing outright: new PK3s, old launcher.
     for f in [*ENGINE_FILES, IWAD]:
-        shutil.copyfile(engine_src / f, out / "engine" / f)
+        src, dst = engine_src / f, out / "engine" / f
+        if not (dst.exists() and src.resolve() == dst.resolve()):
+            shutil.copyfile(src, dst)
     for f in TEMPLATE_FILES:
         shutil.copyfile(TEMPLATE_DIR / f, out / f)
 

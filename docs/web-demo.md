@@ -76,15 +76,102 @@ us on launch day: transitions "worked locally" because the local test was
 `margate.pk3`, a 9-map region pack. Same engine, different content.)
 
 The replacement uses a channel that already existed: the HUD prints
-`P2W TLM map=… x=… y=…` telemetry to the console, and the launcher *is* the
-console. It watches the stream against the district manifest: within 25m of
-an edge whose neighbour exists, a banner names what's ahead; within 4m the
-page navigates to the neighbour itself. Armed only after the player has been
-seen clear of every edge once, so arriving on a tile whose spawn sits near a
-border cannot ping-pong straight back. The chosen performance mode carries
-across; position does not (you arrive at the neighbour's spawn) — it is a
-crossing, not a seam. Telemetry built for "I got stuck here" bug reports
-became the navigation system.
+`P2W TLM map=… x=… y=… z=… ang=…` telemetry to the console, and the launcher
+*is* the console. It watches the stream against the district manifest: within
+25m of an edge whose neighbour exists, a banner names what's ahead; within 4m
+the page navigates to the neighbour itself. Armed only after the player has
+been seen clear of every edge once, so arriving on a tile whose spawn sits
+near a border cannot ping-pong straight back. Telemetry built for "I got
+stuck here" bug reports became the navigation system.
+
+**And the position comes with you** (2026-08-04, second pass). It did not at
+first — you arrived at the neighbour's spawn point, which is a different
+street in a different part of the tile and reads as being teleported rather
+than as walking. The in-engine region transition has always carried the
+player across, keeping the coordinate parallel to the seam and landing 6m
+inside the far edge; what it keeps it in are *fields on the handler*, and a
+page navigation ends the process those fields live in.
+
+So the same four numbers go out through the command line instead. The
+launcher appends them to the neighbour's URL, and the next page passes them
+as `+set p2w_entry_x …` (declared in a `CVARINFO` lump, read once in
+`WorldLoaded`, latched so a later respawn cannot re-trigger it). From there
+it is the *existing* arrival code — same mirroring, same `TryPlace` floor and
+occupancy checks, same 16m spiral when you would have landed inside a tree.
+
+Two things are deliberate. The launcher sends the raw departure position and
+a direction of travel, **not** a finished arrival point: the mirroring rule
+then exists once, in the language that owns `REENTRY`, instead of once in
+each and free to drift. And `P2W ARRIVE` is printed after placement rather
+than before, because the spiral can move you 16m and the fallback ignores
+both checks — the requested point is not evidence that anything worked.
+
+Measured in native GZDoom (the cvar path is core engine, not wasm):
+`+set p2w_entry_x 12345 +set p2w_entry_y 9000 +set p2w_entry_z 500 +set
+p2w_entry_ang 270 +set p2w_entry_dir 1` on `bng800-782-208` logged
+`P2W ARRIVE x=12345 y=192 z=511 ang=270` — the along-seam coordinate kept,
+`y` mirrored to `REENTRY` inside the south edge, the floor found 11 units
+from the departure height, facing unchanged. All four directions were then
+measured separately, because the bug below only showed in two of them.
+
+### A negative value does not survive GZDoom's command line
+
+This cost an hour and produced a *correct-looking* crossing in half the
+compass. GZDoom splits its command line at every argument beginning with `-`
+or `+`, so a negative **value** is read as the start of a new parameter:
+`+set p2w_entry_z -400` is a `set` with no value, followed by an unknown
+`-400`. The cvar keeps its default and **nothing is logged** — no warning, no
+error, no clue. Measured directly: that line left the cvar at `-1`, and
+`+set p2w_entry_dy -1` left it at `0`.
+
+The consequence was not a failure, which is the dangerous part. Crossing
+*north* or *east* sends a positive `dy`/`dx` and worked perfectly; crossing
+*south* or *west* sends a negative one, which vanished, so the mirroring
+never happened and the player arrived at the raw departure coordinate — on
+the same side of the new tile as the seam they had just left, one step from
+crossing straight back. Two of four directions right is exactly the kind of
+half-working that reads as working.
+
+So nothing sent that way may be negative:
+
+- **the crossing direction is a compass index** (1 = north … 4 = west), not
+  the `(dx, dy)` pair the in-engine transition uses;
+- **z is biased by 65536** on the way out and unbiased on the way in. z is
+  the one entry value that legitimately goes below zero, because floors here
+  are at absolute ordnance-datum height.
+
+Both ends of both rules are pinned by `tests/test_webdemo.py`, which is the
+only thing standing between this and a silent regression: the two languages
+cannot check each other, and the failure has no symptom at the point of the
+mistake.
+
+## Phones
+
+The engine reads keyboard and mouse. SDL's touch handlers are compiled in —
+they are visible in `uzdoom.js` — but a desktop Doom has nothing bound to a
+finger, and the first phone report was that the tile boots and then cannot be
+played. The launcher therefore synthesises the input the engine is already
+listening for: `KeyboardEvent`s with the right `code` (SDL maps a key by
+`code`, not `keyCode`) for a floating left-hand stick, and `mousemove` for a
+right-hand look drag. All of it on GZDoom's *default* bindings, because the
+console is unreachable in a browser and nothing can be rebound.
+
+- `movementX` in a `MouseEvent` constructor is a legacy extension rather than
+  part of `MouseEventInit`, so it is feature-detected; where it is missing,
+  looking falls back to holding the turn keys. Both `movementX` and a moving
+  `clientX` are sent, because without a pointer lock — and a phone cannot
+  grant one — SDL derives motion from the absolute position instead.
+- `freelook 1` is forced on touch: with it off, vertical mouse motion is
+  read as walking, so a drag to look up would march you down the street.
+- `play.html` had **no viewport meta tag at all**, so a phone laid it out at
+  980px and scaled it down. That alone made the canvas a postage stamp.
+- Detection is coarse-pointer **and** a touch digitiser: a touchscreen laptop
+  has the second without being a phone, and it still has a real mouse.
+
+Untested on a real handset at the time of writing — this is the one part of
+the change with no measurement behind it. The performance question is open
+too, and pessimistic: a tile is CPU-bound in the wasm main thread on a
+desktop, so the chooser recommends PERFORMANCE on touch and does not decide.
 
 ## Performance: measured, CPU-bound
 
@@ -163,6 +250,20 @@ not the bucket:
 Deploying is `python scripts/build-webdemo.py …` then
 `rclone sync site r2:doommap` (rclone remote configured against the bucket's
 S3 endpoint with an R2 API token scoped to the one bucket).
+
+**And then bump `PK3_V` in `play.html`.** The long cache rule is what makes
+repeat traffic free, and it is also a 30-day trap: tile PK3s and
+`common.pk3` are cached 30 days at the edge under URLs a rebuild *reuses*. A
+deploy that changes tile contents is therefore invisible to any edge holding
+the old copy — for a month — while `rclone check` reports the bucket as
+perfectly in sync, because the bucket is. The launcher now appends
+`?v=<PK3_V>` to those two fetches, and `play.html` is on the short rule, so
+bumping the constant is a 15-minute rollout with no cache purge needed.
+The same trap in miniature caught the launcher itself twice on launch day:
+"the edge transitions have stopped working" was, both times, a browser or an
+edge holding the previous `play.html`. Check with a cache-buster
+(`curl "…/play.html?x=$RANDOM"`) before believing any report about a
+deployed change — including your own.
 
 ## Licensing
 

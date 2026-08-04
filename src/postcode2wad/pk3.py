@@ -175,6 +175,15 @@ def write_region_pk3(
     files: dict[str, bytes] = {}
     if art_seed is not None:
         files.update(art.pk3_assets(art_seed))
+    if event_handler is not None:
+        # Imported here rather than at module scope: the cvars are only read by
+        # the handler's script, so they travel with it, and a top-level import
+        # of hud from here is a cycle waiting to happen. Declaring them gives
+        # the reads a typed default when the launcher passes nothing, which is
+        # every launch that is not a tile crossing.
+        from .hud import CVARINFO, CVARINFO_LUMP
+
+        files[CVARINFO_LUMP] = CVARINFO.encode()
     title = maps[0][1] if maps else "Region"
     files[attribution.FILENAME] = attribution.text(title, __version__, tile_id).encode()
     files.update(extra_files or {})

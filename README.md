@@ -66,8 +66,11 @@ to a single bad tile. Packs of more than 99 maps are named `M0001`.. rather than
 **And all of it is playable in a browser: [doomearth.clawhangout.com](https://doomearth.clawhangout.com).**
 Pick any of Thanet's 200 tiles off a minimap grid, choose a performance mode, spawn on
 it, and walk to a tile edge to cross into the neighbour — the launcher reads the HUD's
-telemetry off the engine's console stream and loads the next tile when you push into
-the boundary. The engine is [uzdoom-wasm](https://github.com/abootnet/uzdoom-wasm)
+telemetry off the engine's console stream, loads the next tile when you push into the
+boundary, and hands your position across so you come out on the same street rather than
+at the new tile's spawn point. Phones get on-screen controls; you start with your fists
+rather than a gun (`?weapon=none` for empty hands). The engine is
+[uzdoom-wasm](https://github.com/abootnet/uzdoom-wasm)
 (UZDoom under Emscripten); the site is nothing but static files on Cloudflare R2.
 `scripts/build-webdemo.py` assembles it from district artifacts, and
 [`docs/web-demo.md`](docs/web-demo.md) records what it took — four boot failures that
