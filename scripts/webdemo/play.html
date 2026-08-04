@@ -35,6 +35,18 @@
   #modes button b{display:block;font-size:13px;letter-spacing:1px}
   #modes button span{color:#8a8a92;font-size:11px}
   #modes button:hover span{color:#e8b8b8}
+  #hop{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:8;
+       display:none;gap:10px}
+  #hop a{background:rgba(19,19,22,.92);border:1px solid #c44;color:#dcdcdc;
+         padding:10px 16px;text-decoration:none;font:inherit}
+  #hop a:hover{background:#742828;color:#fff}
+  #hop b{color:#fff}
+  #exited{position:fixed;inset:0;z-index:9;background:rgba(11,11,12,.94);
+          display:flex;flex-direction:column;align-items:center;
+          justify-content:center;gap:16px;color:#dcdcdc;font-size:14px}
+  #exited a{color:#fff;background:#742828;border:1px solid #c44;
+            padding:10px 20px;text-decoration:none}
+  #exited a:hover{background:#c44}
 </style>
 </head>
 <body>
@@ -127,6 +139,63 @@ async function grabRaw(name, label) {
   return buf;
 }
 
+// ---- neighbour hop -------------------------------------------------------
+//
+// Single-tile PK3s have no in-engine transitions: the engine cannot be handed
+// a new file mid-run, so crossing a seam is a page navigation. The channel
+// that makes this possible is the telemetry the HUD already prints — P2W TLM
+// lines carry the player's map coordinates, and this page is the console.
+// Watch them; near an edge with a built neighbour, offer the crossing.
+let hopInfo = null;  // {units, byPos} once the manifest arrives
+if (D && TILE) {
+  fetch(D + '/manifest.json').then(r => r.json()).then(m => {
+    const me = m.tiles.find(t => t.id === TILE);
+    if (!me) return;
+    hopInfo = {
+      units: m.size_m * 32,  // 32 map units to the metre
+      me,
+      byPos: new Map(m.tiles.map(t => [t.ix + ',' + t.iy, t])),
+    };
+  }).catch(() => {});
+}
+
+const hopEl = document.createElement('div');
+hopEl.id = 'hop';
+document.body.appendChild(hopEl);
+
+const TLM_RE = /P2W TLM \S+ x=(-?\d+) y=(-?\d+)/;
+const EDGE = 800;  // 25m — close enough to mean it, far enough to read the sign
+
+function tlmWatch(line) {
+  const m = TLM_RE.exec(line);
+  if (!m || !hopInfo) return;
+  const x = +m[1], y = +m[2];
+  const u = hopInfo.units, me = hopInfo.me;
+  // y grows northward, x eastward (matches the OSGB grid the tiles live on).
+  const dirs = [
+    ['north', 0, 1, y > u - EDGE], ['south', 0, -1, y < EDGE],
+    ['east', 1, 0, x > u - EDGE], ['west', -1, 0, x < EDGE],
+  ];
+  const offers = [];
+  for (const [name, dx, dy, near] of dirs) {
+    if (!near) continue;
+    const n = hopInfo.byPos.get((me.ix + dx) + ',' + (me.iy + dy));
+    if (n) offers.push([name, n]);
+  }
+  hopEl.innerHTML = '';
+  for (const [name, n] of offers) {
+    const a = document.createElement('a');
+    a.href = 'play.html?d=' + encodeURIComponent(D)
+           + '&tile=' + encodeURIComponent(n.id)
+           + (chosenScale ? '&scale=' + chosenScale : '');
+    a.innerHTML = 'Continue ' + name + ' &rarr; <b>' + n.title + '</b>';
+    hopEl.appendChild(a);
+  }
+  hopEl.style.display = offers.length ? 'flex' : 'none';
+}
+
+let chosenScale = qs.get('scale') || '';
+
 function boot(args, pkg, files) {
   statusEl.textContent = 'booting…';
   window.Module = {
@@ -146,17 +215,30 @@ function boot(args, pkg, files) {
         }
       }
     },
-    print: m => say(m),
+    // Quitting from the engine's own menu ends the wasm runtime; without this
+    // hook the page just sits there dead with no way back.
+    onExit: code => showExited('Thanks for playing.'),
+    print: m => { say(m); tlmWatch(m); },
     printErr: m => say(m, 'e'),
     onAbort: m => {
       say('ABORT: ' + m, 'e');
-      statusEl.textContent = 'engine aborted — see log (bottom right)';
+      showExited('The engine crashed — the log (bottom right) has the details.');
     },
   };
   const s = document.createElement('script');
   s.src = 'engine/uzdoom.js';
   s.onerror = () => say('could not load engine/uzdoom.js', 'e');
   document.body.appendChild(s);
+}
+
+function showExited(msg) {
+  hopEl.style.display = 'none';
+  const o = document.createElement('div');
+  o.id = 'exited';
+  o.innerHTML = '<div>' + msg + '</div>'
+    + '<a href="./">&larr; back to the map</a>'
+    + '<a href="" onclick="location.reload();return false">play this tile again</a>';
+  document.body.appendChild(o);
 }
 
 (async () => {
@@ -204,6 +286,7 @@ function boot(args, pkg, files) {
   for (const b of modes.querySelectorAll('button')) {
     b.onclick = () => {
       modes.remove();
+      chosenScale = b.dataset.scale;  // carried into neighbour-hop links
       const extra = b.dataset.scale ? ['+vid_scalefactor', b.dataset.scale] : [];
       say('mode: ' + b.querySelector('b').textContent
           + (b.dataset.scale ? ' (scale ' + b.dataset.scale + ')' : ''), 'ok');
