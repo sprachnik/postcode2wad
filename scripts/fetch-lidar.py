@@ -61,36 +61,22 @@ SUBSCRIPTION_KEY = "dspui"
 USER_AGENT = "postcode2wad/0.1 (+https://github.com/sprachnik/postcode2wad)"
 TIMEOUT = 600
 
-#: ONS Local Authority Districts (Dec 2023), full-resolution clipped to the
-#: coastline — which matters here, because a generalised boundary would pull in
-#: 5km squares that are entirely sea.
-ONS_LAD = (
-    "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/"
-    "Local_Authority_Districts_December_2023_Boundaries_UK_BFC/FeatureServer/0/query"
-)
-
-
 def district_tiles(name: str) -> list[str]:
-    """Every 5km grid tile a named local authority district touches."""
-    from shapely.geometry import box, shape
+    """Every 5km grid tile a named local authority district touches.
 
-    response = requests.get(
-        ONS_LAD,
-        params={
-            "where": f"LAD23NM='{name}'",
-            "outFields": "LAD23CD,LAD23NM",
-            "returnGeometry": "true",
-            "outSR": "27700",
-            "f": "geojson",
-        },
-        headers={"User-Agent": USER_AGENT},
-        timeout=TIMEOUT,
-    )
-    response.raise_for_status()
-    features = response.json().get("features") or []
-    if not features:
-        raise SystemExit(f"no district named {name!r} in the ONS 2023 boundaries")
-    polygon = shape(features[0]["geometry"])
+    The boundary itself comes from `sources.boundaries`, shared with
+    `build-district.py` so the two agree on what "Thanet" means — a mirror that
+    covered a different set of squares than the build wants is a build that
+    silently falls back to the network.
+    """
+    from shapely.geometry import box
+
+    from postcode2wad.sources.boundaries import district_polygon
+
+    try:
+        polygon = district_polygon(name)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     min_e, min_n, max_e, max_n = polygon.bounds
     tiles = []
     for east in range(int(min_e // GRID_TILE_M) * GRID_TILE_M, int(max_e) + 1, GRID_TILE_M):

@@ -2,7 +2,7 @@
 
 import pytest
 
-from postcode2wad.hud import build_zscript
+from postcode2wad.hud import MAX_LUMP_NAME, build_zscript, minimap_lump
 from postcode2wad.pk3 import build_region_mapinfo
 from postcode2wad.region import MAX_MAPS, map_name
 from postcode2wad.tiles import Tile
@@ -88,6 +88,56 @@ def test_zscript_parses_whichever_naming_scheme_the_pack_uses():
     big = build_zscript(tiles, names(len(tiles)))
     assert 'mapname.Mid(1, 4)' in big
     assert 'String.Format("M%04d"' in big
+
+
+def test_minimap_lump_names_fit_the_engine_limit():
+    """A nine-character lump name is a HUD that silently does not exist.
+
+    `TexMan.CheckForTexture` will not resolve past eight characters, and it
+    reports that by returning an invalid id rather than failing — so the pack
+    loads, plays, and has no minimap. The old "DMMIN" prefix plus the four
+    digits a 100+ map pack uses came to exactly nine. Measured on one Birchington
+    3x3 built twice with the naming forced: DMM0001 draws the HUD, DMMIN0001
+    draws nothing.
+
+    Checked at both ends of both schemes, because the length only overflows
+    once the pack is large enough to widen the number.
+    """
+    assert minimap_lump(0, 2) == "DMM01"
+    assert minimap_lump(98, 2) == "DMM99"
+    assert minimap_lump(0, 4) == "DMM0001"
+    assert minimap_lump(MAX_MAPS - 1, 4) == f"DMM{MAX_MAPS}"
+
+    for digits in (2, 4):
+        for index in (0, 8, 98, 120):
+            assert len(minimap_lump(index, digits)) <= MAX_LUMP_NAME
+
+
+def test_minimap_lump_refuses_to_emit_a_name_the_engine_cannot_resolve():
+    """Better a build error than 200 maps that quietly have no HUD."""
+    with pytest.raises(ValueError, match="silently"):
+        minimap_lump(0, 6)
+
+
+def test_zscript_asks_for_exactly_the_minimap_lumps_we_write():
+    """The name is formatted twice — in Python and in ZScript — so pin them.
+
+    If the two drift the pack still builds and still loads; the minimap just
+    never appears. There is no error anywhere to notice.
+    """
+    for radius, count in ((1, 9), (5, 121)):
+        tiles = grid(radius)
+        pack = names(len(tiles))
+        script = build_zscript(tiles, pack)
+
+        digits = len(pack[0]) - len("".join(c for c in pack[0] if not c.isdigit()))
+        assert f'String.Format("DMM%0{digits}d"' in script, f"radius {radius}"
+
+        # What the CLI actually writes into graphics/, for the same pack.
+        emitted = [minimap_lump(i, digits) for i in range(len(tiles))]
+        assert emitted[0] == f"DMM{1:0{digits}d}"
+        assert len(set(emitted)) == len(emitted)
+        assert all(len(name) <= MAX_LUMP_NAME for name in emitted)
 
 
 def test_region_mapinfo_declares_every_map_once():

@@ -24,14 +24,47 @@ from .attribution import SHORT as ATTRIBUTION_SHORT
 from .tiles import Tile, osgb_to_lonlat
 
 #: Lump and graphic names. Minimaps are numbered to match their map: MAP03's
-#: minimap is DMMIN03, so the script derives the name instead of storing it.
-MINIMAP = "DMMIN01"
+#: minimap is DMM03, so the script derives the name instead of storing it.
+#:
+#: The prefix is three characters rather than the more readable "DMMIN"
+#: because a pack of more than 99 maps numbers them with four digits, and
+#: "DMMIN0001" is nine. **GZDoom's texture manager will not resolve a lump name
+#: longer than eight characters**, so `TexMan.CheckForTexture` came back invalid
+#: and `RenderOverlay` gave up on the spot — a 200-tile district pack loaded
+#: fine, played fine, and had no HUD on any of its 200 maps. Measured on one
+#: pack built twice: `DMM0001` draws the minimap, compass, coordinates and
+#: credit; `DMMIN0001` draws nothing at all. Three characters plus four digits
+#: is seven, which leaves the scheme headroom to `MAX_MAPS`.
+MINIMAP_PREFIX = "DMM"
+
+#: The classic WAD lump name limit. PK3 *file* names can be longer — and long
+#: texture names are legal in UDMF, which is what makes the rest of the
+#: generated art safe — but a name reached through `TexMan` cannot be.
+MAX_LUMP_NAME = 8
+
+
 #: Must match the class name in the template, and be registered in MAPINFO.
 HANDLER = "PostcodeHUD"
 ZSCRIPT_LUMP = "ZSCRIPT"
 
 #: GZDoom feature level the script is written against.
 ZSCRIPT_VERSION = "4.10"
+
+
+def minimap_lump(index: int, digits: int = 2) -> str:
+    """The minimap graphic for map `index`, as a bare lump name.
+
+    Shared with the ZScript, which formats the same name at runtime — see
+    `MinimapFor` in the template. If the two ever disagree the HUD silently
+    loses its minimap, so they are pinned together by `test_region.py`.
+    """
+    name = f"{MINIMAP_PREFIX}{index + 1:0{digits}d}"
+    if len(name) > MAX_LUMP_NAME:
+        raise ValueError(
+            f"minimap lump {name!r} is {len(name)} characters; GZDoom's texture "
+            f"manager resolves at most {MAX_LUMP_NAME} and the HUD fails silently"
+        )
+    return name
 
 #: How close to a tile boundary triggers the change, and how far inside the
 #: neighbour you arrive. Both in map units; 96 is 3m, comfortably inside the
@@ -95,6 +128,12 @@ def build_zscript(tiles: list[Tile], map_names: list[str]) -> str:
     prefix = "".join(c for c in map_names[0] if not c.isdigit())
     digits = len(map_names[0]) - len(prefix)
 
+    # Build the widest minimap name this pack will ask for, purely so the length
+    # check in `minimap_lump` runs now. The engine's failure here is silent — an
+    # unresolvable texture, not an error — so it has to be caught at build time
+    # or not at all.
+    minimap_lump(count - 1, digits)
+
     return _TEMPLATE.format(
         version=ZSCRIPT_VERSION,
         count=len(tiles),
@@ -104,6 +143,7 @@ def build_zscript(tiles: list[Tile], map_names: list[str]) -> str:
         prefix=prefix,
         prefix_len=len(prefix),
         digits=digits,
+        minimap_prefix=MINIMAP_PREFIX,
         name_len=len(map_names[0]),
         reentry=float(REENTRY_UNITS),
         ix=_array(t.ix for t in tiles),
@@ -217,7 +257,7 @@ class PostcodeHUD : StaticEventHandler
     // ui-side only.
     ui String MinimapFor(int index)
     {{
-        return String.Format("DMMIN%0{digits}d", index + 1);
+        return String.Format("{minimap_prefix}%0{digits}d", index + 1);
     }}
 
     // Not static: a static function cannot see the class's own static const
@@ -563,8 +603,14 @@ class PostcodeHUD : StaticEventHandler
 
         // Not called `map`: that is ZScript's dictionary type and shadowing it
         // reports as "Unknown identifier 'Map'" several lines later.
+        //
+        // A missing minimap costs the minimap and nothing else. This used to
+        // `return` here, so one unresolved texture took the compass, the
+        // coordinates and the attribution credit down with it -- which is
+        // exactly how a nine-character lump name turned into "the whole HUD is
+        // gone" and read as a HUD bug rather than a naming one. Same shape as
+        // the octal map-number parse: one narrow failure, the entire overlay.
         TextureID minimap = TexMan.CheckForTexture(MinimapFor(here), TexMan.Type_Any);
-        if (!minimap.IsValid()) return;
 
         int sh = Screen.GetHeight();
         int panel = int(sh * PANEL_FRAC);
@@ -574,22 +620,25 @@ class PostcodeHUD : StaticEventHandler
         int py = MARGIN;
         double cx = px + panel * 0.5;
 
-        Screen.DrawTexture(minimap, false, px, py,
-            DTA_DestWidth, panel, DTA_DestHeight, panel,
-            DTA_Alpha, 0.86);
-        // Square, matching the tile. A round minimap crops the tile corners, and
-        // a player standing in one would have no marker at all.
-        DrawBox(px, py, panel, Color(220, 16, 18, 22));
-        DrawBox(px + 1, py + 1, panel - 2, Color(150, 210, 214, 220));
-
-        // Where we are, as a fraction of the tile. The minimap is north-up and
-        // covers the tile exactly, so this is a straight scale.
-        double fx = e.ViewPos.X / TILE_UNITS;
-        double fy = e.ViewPos.Y / TILE_UNITS;
-        if (fx >= 0.0 && fx <= 1.0 && fy >= 0.0 && fy <= 1.0)
+        if (minimap.IsValid())
         {{
-            DrawArrow(px + fx * panel, py + (1.0 - fy) * panel,
-                      e.ViewAngle, panel * 0.05, Color(255, 255, 80, 96));
+            Screen.DrawTexture(minimap, false, px, py,
+                DTA_DestWidth, panel, DTA_DestHeight, panel,
+                DTA_Alpha, 0.86);
+            // Square, matching the tile. A round minimap crops the tile corners,
+            // and a player standing in one would have no marker at all.
+            DrawBox(px, py, panel, Color(220, 16, 18, 22));
+            DrawBox(px + 1, py + 1, panel - 2, Color(150, 210, 214, 220));
+
+            // Where we are, as a fraction of the tile. The minimap is north-up
+            // and covers the tile exactly, so this is a straight scale.
+            double fx = e.ViewPos.X / TILE_UNITS;
+            double fy = e.ViewPos.Y / TILE_UNITS;
+            if (fx >= 0.0 && fx <= 1.0 && fy >= 0.0 && fy <= 1.0)
+            {{
+                DrawArrow(px + fx * panel, py + (1.0 - fy) * panel,
+                          e.ViewAngle, panel * 0.05, Color(255, 255, 80, 96));
+            }}
         }}
 
         double lat = TILE_LAT0[here] + LAT_PER_X * e.ViewPos.X + LAT_PER_Y * e.ViewPos.Y;

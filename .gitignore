@@ -19,6 +19,10 @@ tools/
 !tests/fixtures/*.wad
 cache/
 out/
+# Per-tile artifacts and logs from scripts/build-district.py. One district is
+# hundreds of tile zips; they exist so a multi-hour run can resume, not to be
+# kept. Delete the directory to force a full rebuild.
+work/
 # Bulk source data: the Geofabrik .osm.pbf and the 5km LIDAR mirror. Kent's
 # terrain alone is ~10 GB of GeoTIFF, fetched by scripts/fetch-lidar.py.
 data/
