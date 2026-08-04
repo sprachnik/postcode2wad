@@ -35,10 +35,12 @@
   #modes button b{display:block;font-size:13px;letter-spacing:1px}
   #modes button span{color:#8a8a92;font-size:11px}
   #modes button:hover span{color:#e8b8b8}
-  #hop{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:8;
-       display:none;gap:10px}
-  #hop a{background:rgba(19,19,22,.92);border:1px solid #c44;color:#dcdcdc;
-         padding:10px 16px;text-decoration:none;font:inherit}
+  #hop{position:fixed;top:22%;left:50%;transform:translateX(-50%);z-index:8;
+       display:none;gap:12px;flex-direction:column;align-items:center;
+       text-align:center}
+  #hop a{background:rgba(11,11,12,.88);border:2px solid #c44;color:#dcdcdc;
+         padding:16px 26px;text-decoration:none;font:inherit;font-size:17px;
+         letter-spacing:1px}
   #hop a:hover{background:#742828;color:#fff}
   #hop b{color:#fff}
   #exited{position:fixed;inset:0;z-index:9;background:rgba(11,11,12,.94);
@@ -164,31 +166,53 @@ hopEl.id = 'hop';
 document.body.appendChild(hopEl);
 
 const TLM_RE = /P2W TLM \S+ x=(-?\d+) y=(-?\d+)/;
-const EDGE = 800;  // 25m — close enough to mean it, far enough to read the sign
+const EDGE_SHOW = 800;  // 25m out: show where the edge leads
+const EDGE_GO = 128;    // 4m out: you are pushing into the boundary — cross
+
+// Crossing is automatic at the boundary, like a region pack, because the
+// pointer lock makes clicking a button mean pressing Esc first. Armed only
+// after the player has been seen clear of every edge once, so arriving on a
+// tile whose spawn is near a border cannot ping-pong straight back.
+let hopArmed = false;
+let hopping = false;
+
+function hopUrl(n) {
+  return 'play.html?d=' + encodeURIComponent(D)
+       + '&tile=' + encodeURIComponent(n.id)
+       + (chosenScale ? '&scale=' + chosenScale : '');
+}
 
 function tlmWatch(line) {
   const m = TLM_RE.exec(line);
-  if (!m || !hopInfo) return;
+  if (!m || !hopInfo || hopping) return;
   const x = +m[1], y = +m[2];
   const u = hopInfo.units, me = hopInfo.me;
   // y grows northward, x eastward (matches the OSGB grid the tiles live on).
   const dirs = [
-    ['north', 0, 1, y > u - EDGE], ['south', 0, -1, y < EDGE],
-    ['east', 1, 0, x > u - EDGE], ['west', -1, 0, x < EDGE],
+    ['north', 0, 1, u - y], ['south', 0, -1, y],
+    ['east', 1, 0, u - x], ['west', -1, 0, x],
   ];
+  if (!hopArmed && dirs.every(([, , , d]) => d > EDGE_SHOW)) hopArmed = true;
+
   const offers = [];
-  for (const [name, dx, dy, near] of dirs) {
-    if (!near) continue;
+  for (const [name, dx, dy, dist] of dirs) {
+    if (dist > EDGE_SHOW) continue;
     const n = hopInfo.byPos.get((me.ix + dx) + ',' + (me.iy + dy));
-    if (n) offers.push([name, n]);
+    if (!n) continue;
+    if (hopArmed && dist < EDGE_GO) {
+      hopping = true;
+      hopEl.innerHTML = '<a>Entering <b>' + n.title + '</b>&hellip;</a>';
+      hopEl.style.display = 'flex';
+      location.href = hopUrl(n);
+      return;
+    }
+    offers.push([name, n]);
   }
   hopEl.innerHTML = '';
   for (const [name, n] of offers) {
     const a = document.createElement('a');
-    a.href = 'play.html?d=' + encodeURIComponent(D)
-           + '&tile=' + encodeURIComponent(n.id)
-           + (chosenScale ? '&scale=' + chosenScale : '');
-    a.innerHTML = 'Continue ' + name + ' &rarr; <b>' + n.title + '</b>';
+    a.href = hopUrl(n);
+    a.innerHTML = 'Ahead ' + name + ': <b>' + n.title + '</b> — keep walking to cross';
     hopEl.appendChild(a);
   }
   hopEl.style.display = offers.length ? 'flex' : 'none';
