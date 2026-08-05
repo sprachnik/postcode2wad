@@ -698,6 +698,15 @@ def build_tile(
                                 wall_tex=textures.RAIL_HEAD,
                                 light=ROAD_LIGHT,
                                 thin=True,
+                                # Sloped, exactly as the ballast beneath is.
+                                # Without this the rail is one flat plane along
+                                # its whole length while the ballast follows the
+                                # ground, so anywhere the terrain falls the rail
+                                # stands proud by the entire drop — reported as
+                                # rails "tall like a fence". Birchington runs
+                                # 8-24m, which is a lot of fall to stand on.
+                                # The height constant was never the cause.
+                                sloped=with_slopes,
                             )
                         )
         stats.railways += 1
@@ -742,6 +751,12 @@ def build_tile(
                             wall_tex=wall,
                             light=DAYLIGHT,
                             thin=True,   # a fence is meant to be this narrow
+                            # Sloped, or the top of the barrier is one flat
+                            # plane while the ground falls away under it — so a
+                            # fence grows taller the further the land drops.
+                            # Reported from play as fences below ground level
+                            # standing up to meet it. Same defect as the rails.
+                            sloped=with_slopes,
                         )
                     )
             stats.barriers += 1
