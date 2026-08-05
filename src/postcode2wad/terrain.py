@@ -296,8 +296,28 @@ def vegetation(
                 continue
             for x, y in _scatter(part, per_tree_units, rng):
                 trees.append(Tree(x=x, y=y, height_m=height))
-                if len(trees) >= max_trees:
-                    return trees
+
+    # Thin to the budget by sampling, never by stopping early.
+    #
+    # This used to `return trees` the moment it hit max_trees, from inside the
+    # blob loop. That does not cap the count so much as crop the tile: `shapes`
+    # yields blobs in raster scan order and the transform runs north to south,
+    # so a wooded tile got its whole allowance from the top and the rest was
+    # bare. Measured on Thanet before the change: 48 of 200 tiles sat at exactly
+    # 900, and on one of them all 900 trees fell in the northern 32% of the tile
+    # (median 84% up) against 74% coverage on an uncapped neighbour. The
+    # woodland stopped at an invisible east-west line, which from inside the
+    # level reads as "the trees just end".
+    #
+    # Sampling keeps the same budget and the same worst-case sprite count, and
+    # costs scattering the whole canopy before thinning it — bounded by tile
+    # area (~14k candidates if a tile were solid woodland), so cheap.
+    #
+    # `rng` is the tile-seeded generator, so the same tile still grows the same
+    # wood; sorting the indices keeps the emitted order stable too.
+    if len(trees) > max_trees:
+        keep = sorted(rng.choice(len(trees), size=max_trees, replace=False))
+        trees = [trees[i] for i in keep]
     return trees
 
 

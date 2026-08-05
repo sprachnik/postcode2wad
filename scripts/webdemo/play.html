@@ -80,6 +80,15 @@
          letter-spacing:1px;pointer-events:auto}
   #hop a:hover{background:#742828;color:#fff}
   #hop b{color:#fff}
+  /* Deliberately covers the canvas: any click resumes, so the player does not
+     have to find a target while the level is already running underneath. */
+  #resume{position:fixed;inset:0;z-index:9;display:flex;align-items:center;
+          justify-content:center;background:rgba(11,11,12,.55);cursor:pointer}
+  #resume div{background:rgba(11,11,12,.92);border:2px solid #c44;
+              padding:18px 30px;font-size:17px;letter-spacing:1px;color:#fff;
+              text-align:center}
+  #resume span{display:block;font-size:11px;letter-spacing:0;color:#8a8a92;
+               margin-top:6px}
   #exited{position:fixed;inset:0;z-index:9;background:rgba(11,11,12,.94);
           display:flex;flex-direction:column;align-items:center;
           justify-content:center;gap:16px;color:#dcdcdc;font-size:14px}
@@ -204,6 +213,9 @@ const Z_BIAS = 65536;   // must equal ENTRY_Z_BIAS in hud.py
 // change. Same value, one of them reversible over lunch.
 const WEAPON_MODES = { none: '0', fist: '1', keep: '2' };
 const WEAPON = qs.get('weapon') || 'fist';
+//: Set by hopUrl when the player crossed a seam while fullscreen. See the
+//: comment there: both fullscreen and pointer lock die with the document.
+const WANT_FS = qs.get('fs') === '1';
 
 const logEl = document.getElementById('log');
 const bar = document.getElementById('bar');
@@ -298,9 +310,17 @@ let lastTlm = null;
 // uses. Two copies of that rule in two languages is how the two ends drift
 // apart without either looking wrong.
 function hopUrl(n, dir) {
+  // Fullscreen and pointer lock are per-*document*, so a crossing loses both:
+  // the seam is a page navigation, and no browser will let a freshly loaded
+  // page take either without a user gesture. The state a player had is
+  // therefore carried in the URL and offered back on the far side, which is a
+  // click rather than the two or three it otherwise costs to dig fullscreen
+  // back out of the engine's menu. Removing the click entirely means not
+  // navigating at all — that is M5, not this.
   let u = 'play.html?d=' + encodeURIComponent(D)
         + '&tile=' + encodeURIComponent(n.id)
         + (chosenScale ? '&scale=' + chosenScale : '')
+        + (document.fullscreenElement ? '&fs=1' : '')
         + (WEAPON ? '&weapon=' + encodeURIComponent(WEAPON) : '');
   if (lastTlm) {
     // Clamped and biased so every one of these is non-negative; see DIR_CODE.
@@ -441,6 +461,35 @@ function scheduleRetry() {
   }, 1500);
 }
 
+// ---- resume after a seam crossing ----------------------------------------
+//
+// Arriving from a hop that was fullscreen, both fullscreen and the pointer
+// lock are gone and only a user gesture can get them back. So: one prompt,
+// one click anywhere, both restored together. It is armed once and disarms
+// itself, because a stray click much later should not yank the player into
+// fullscreen out of nowhere.
+function offerResume() {
+  if (!WANT_FS || TOUCH) return;
+  const el = document.createElement('div');
+  el.id = 'resume';
+  el.innerHTML = '<div>click to resume<span>fullscreen and mouse look</span></div>';
+  document.body.appendChild(el);
+
+  const go = () => {
+    el.remove();
+    document.removeEventListener('pointerdown', go, true);
+    // Fullscreen first: taking the lock re-lays-out nothing, but entering
+    // fullscreen does, and doing it the other way round can drop the lock.
+    const p = document.documentElement.requestFullscreen
+      ? document.documentElement.requestFullscreen()
+      : null;
+    if (p && p.catch) p.catch(() => lockLog('fullscreen refused'));
+    takeLock('resume after crossing');
+  };
+  // Capture phase, so the click is not eaten by whatever it lands on.
+  document.addEventListener('pointerdown', go, true);
+}
+
 canvasEl.addEventListener('click', () => takeLock('canvas click'));
 // The click that recaptures often lands on an overlay rather than the canvas,
 // and a mousedown anywhere in the page is still a user gesture, so honour it.
@@ -463,7 +512,7 @@ const diagEl = document.getElementById('diag');
 // Bump on every deploy that changes this file. It is shown on screen so a
 // screenshot answers "are you even on the new build?" without anyone having to
 // read a cache header.
-const BUILD = '20260805e';
+const BUILD = '20260805f';
 
 function renderDiag() {
   if (TOUCH) { diagEl.style.display = 'none'; return; }
@@ -723,6 +772,8 @@ function boot(args, pkg, files) {
         booted = true;
         if (TOUCH) {
           startTouchControls();
+        } else if (WANT_FS) {
+          offerResume();
         } else {
           statusEl.textContent = 'click the game to capture the mouse';
           setTimeout(() => {
