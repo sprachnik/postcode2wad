@@ -51,6 +51,11 @@
            padding:5px 9px;font-size:11px;color:var(--dim);pointer-events:none;
            line-height:1.5}
   #readout b{color:var(--text);font-weight:400}
+  /* Sits above the readout, deliberately dim: useful when something is wrong,
+     invisible when nothing is. */
+  #mapdiag{position:absolute;left:10px;bottom:58px;z-index:3;
+           background:rgba(11,11,12,.7);padding:3px 7px;
+           color:#5a5a62;font-size:10px;pointer-events:none}
   #scalebar{position:absolute;right:10px;bottom:10px;z-index:3;
             background:rgba(11,11,12,.86);border:1px solid var(--border);
             padding:4px 8px;font-size:11px;color:var(--dim);pointer-events:none}
@@ -106,6 +111,7 @@ product.</div></div>
       <button id="zfit" title="Fit all built tiles" style="font-size:11px">fit</button>
     </div>
     <div id="readout"></div>
+    <div id="mapdiag"></div>
     <div id="scalebar"></div>
     <div id="maphint">loading coverage&hellip;</div>
   </div>
@@ -185,6 +191,7 @@ const tabs = document.getElementById('districts');
 const sub = document.getElementById('sub');
 const readout = document.getElementById('readout');
 const scaleBar = document.getElementById('scalebar');
+const mapDiag = document.getElementById('mapdiag');
 const mapHint = document.getElementById('maphint');
 
 // Zoom limits, in pixels per metre. The minimaps are 256px for an 800m tile,
@@ -320,7 +327,16 @@ function fitBounds(b) {
   render();
 }
 
-const clampPpm = v => Math.max(MIN_PPM, Math.min(MAX_PPM, v));
+// The isFinite guard is not defensive programming for its own sake. Every
+// number downstream — tile positions, widths, the scale bar — is derived from
+// ppm, and Math.max/Math.min propagate NaN silently rather than throwing. One
+// bad wheel event would therefore poison the camera permanently and every tile
+// would stop drawing, with no error anywhere. Falling back to the current zoom
+// makes a bad event a no-op instead.
+function clampPpm(v) {
+  if (!isFinite(v) || v <= 0) return cam.ppm;
+  return Math.max(MIN_PPM, Math.min(MAX_PPM, v));
+}
 
 // ---- render ---------------------------------------------------------------
 
@@ -333,7 +349,7 @@ function render() {
   ctx.imageSmoothingEnabled = cam.ppm < 0.32;
 
   const tl = toWorld(0, 0), br = toWorld(vw, vh);
-  let drawn = 0;
+  let drawn = 0, shown = 0, blocks = 0, tilePx = 0;
   inFlight = Math.max(0, inFlight);
 
   // The visible ix/iy range per district. Computed once and reused, because
@@ -360,21 +376,29 @@ function render() {
   for (const { d, ix0, ix1, iy0, iy1 } of windows) {
     const px = d.size_m * cam.ppm;           // one tile, in screen pixels
     const wantImage = px >= TILE_PX_FOR_IMAGE && visible <= MAX_IMAGE_TILES;
+    tilePx = px;
 
     for (let iy = iy0; iy <= iy1; iy++) {
       for (let ix = ix0; ix <= ix1; ix++) {
         const t = d.byPos.get(ix + ',' + iy);
         if (!t) continue;
         const p = toScreen(ix * d.size_m, (iy + 1) * d.size_m);   // NW corner
-        // +1 closes the hairline seam sub-pixel positions leave between tiles.
-        const w = Math.ceil(px) + 1;
+        // Inset each tile so the sea colour behind shows through as a grid
+        // line — the CSS version had `gap:2px` and reading it as a grid of
+        // squares turns out to be most of what makes it legible as a *map*
+        // rather than a blob. The gap has to shrink with zoom and reach zero,
+        // or a country-wide view is more gap than tile.
+        const gap = px >= 26 ? 2 : px >= 12 ? 1 : 0;
+        const w = Math.max(1, Math.round(px) - gap);
         const img = wantImage ? tileImage(d.slug, t.id, true) : null;
         const rec = images.get(d.slug + '/' + t.id);
         if (img && rec && rec.ok) {
           ctx.drawImage(img, p.x, p.y, w, w);
+          shown++;
         } else {
           ctx.fillStyle = '#2b2f38';
           ctx.fillRect(p.x, p.y, w, w);
+          blocks++;
         }
         drawn++;
       }
@@ -394,6 +418,12 @@ function render() {
   if (!drawn && districts.length) {
     mapHint.textContent = 'no built tiles in view — press "fit"';
   }
+  // Visible in the corner because the failure this is here to catch — tiles
+  // silently falling back to blocks — looks identical to "the images have not
+  // loaded yet", and a screenshot of it settles which.
+  mapDiag.textContent = tilePx.toFixed(1) + 'px/tile'
+    + ' · vis ' + visible + ' · img ' + shown + ' · blk ' + blocks
+    + ' · cache ' + images.size + ' · loading ' + inFlight;
   drawScaleBar();
   evictImages();
 }
