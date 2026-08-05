@@ -10,41 +10,16 @@
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--text);
             font:13px ui-monospace,Consolas,monospace}
-  header{padding:26px 20px 10px;max-width:980px;margin:0 auto}
+  header{padding:26px 20px 10px;max-width:1180px;margin:0 auto}
   h1{margin:0;font-size:20px;letter-spacing:2px;color:var(--accent)}
   h1 small{display:block;color:var(--dim);font-size:11px;letter-spacing:1px;
            margin-top:6px;font-weight:400}
-  .intro{color:var(--dim);max-width:640px;line-height:1.6;font-size:12px}
-  #districts{max-width:980px;margin:0 auto;padding:0 20px;display:flex;
-             gap:8px;flex-wrap:wrap}
-  #districts button{background:var(--panel);color:var(--dim);
-                    border:1px solid var(--border);padding:6px 14px;
-                    cursor:pointer;font:inherit}
-  #districts button.on{color:#fff;border-color:var(--accent);
-                       background:#742828}
-  #mapwrap{max-width:980px;margin:14px auto;padding:0 20px;overflow-x:auto}
-  #grid{display:grid;gap:2px;background:var(--sea);padding:8px;
-        border:1px solid var(--border);width:max-content}
-  .tile{position:relative;width:44px;height:44px;padding:0;border:0;
-        cursor:pointer;background-size:cover;background-color:#1a1a1e;
-        image-rendering:pixelated;display:block}
-  .tile:hover{outline:2px solid var(--accent);z-index:2}
-  .sea{width:44px;height:44px;background:var(--sea)}
-  #tip{position:fixed;pointer-events:none;background:var(--panel);
-       border:1px solid var(--border);padding:8px 10px;z-index:10;
-       display:none;line-height:1.5;font-size:11px}
-  #tip .t{color:var(--text)}
-  #tip .d{color:var(--dim)}
-  footer{max-width:980px;margin:30px auto;padding:16px 20px 40px;
-         color:var(--dim);font-size:11px;line-height:1.7;
-         border-top:1px solid var(--border)}
-  footer a{color:#9ab}
-  .k{color:var(--text)}
-  .wip{max-width:980px;margin:0 auto;padding:0 20px 4px}
+  .intro{color:var(--dim);max-width:660px;line-height:1.6;font-size:12px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
   .wip div{background:#1c1710;border:1px solid #4a3a1c;color:#d8c89a;
            padding:9px 12px;font-size:11px;line-height:1.6}
-  #find{max-width:980px;margin:0 auto;padding:14px 20px 0;display:flex;
-        gap:8px;flex-wrap:wrap;align-items:center}
+
+  #find{padding:14px 0 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   #find input{background:var(--panel);color:var(--text);font:inherit;
               border:1px solid var(--border);padding:7px 10px;width:150px;
               text-transform:uppercase}
@@ -56,33 +31,86 @@
   #pcmsg{color:var(--dim);font-size:11px;flex:1 1 240px;min-width:0}
   #pcmsg.warn{color:#d8c89a}
   #pcmsg.err{color:#e08a8a}
+
+  /* ---- map ------------------------------------------------------------- */
+  #mapbox{position:relative;margin:14px 0;border:1px solid var(--border);
+          background:var(--sea);overflow:hidden;touch-action:none}
+  #map{display:block;width:100%;height:62vh;min-height:340px;cursor:grab}
+  #map.drag{cursor:grabbing}
+  .ctrl{position:absolute;z-index:3;display:flex;gap:6px}
+  .ctrl.tl{top:10px;left:10px;flex-wrap:wrap;max-width:calc(100% - 20px)}
+  .ctrl.tr{top:10px;right:10px;flex-direction:column}
+  .ctrl button{background:rgba(19,19,22,.9);color:var(--text);font:inherit;
+               border:1px solid var(--border);padding:5px 10px;cursor:pointer;
+               line-height:1.4}
+  .ctrl button:hover{border-color:var(--accent)}
+  .ctrl button.on{color:#fff;border-color:var(--accent);background:#742828}
+  .ctrl.tr button{width:32px;text-align:center;font-size:15px;padding:3px 0}
+  #readout{position:absolute;left:10px;bottom:10px;z-index:3;
+           background:rgba(11,11,12,.86);border:1px solid var(--border);
+           padding:5px 9px;font-size:11px;color:var(--dim);pointer-events:none;
+           line-height:1.5}
+  #readout b{color:var(--text);font-weight:400}
+  #scalebar{position:absolute;right:10px;bottom:10px;z-index:3;
+            background:rgba(11,11,12,.86);border:1px solid var(--border);
+            padding:4px 8px;font-size:11px;color:var(--dim);pointer-events:none}
+  #scalebar i{display:block;height:3px;background:var(--text);margin-top:3px}
+  #tip{position:fixed;pointer-events:none;background:var(--panel);
+       border:1px solid var(--border);padding:8px 10px;z-index:10;
+       display:none;line-height:1.5;font-size:11px}
+  #tip .t{color:var(--text)}
+  #tip .d{color:var(--dim)}
+  #maphint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+           z-index:2;color:var(--dim);font-size:12px;text-align:center;
+           pointer-events:none;line-height:1.8}
+
+  footer{max-width:1180px;margin:30px auto;padding:16px 20px 40px;
+         color:var(--dim);font-size:11px;line-height:1.7;
+         border-top:1px solid var(--border)}
+  footer a{color:#9ab}
+  .k{color:var(--text)}
 </style>
 </head>
 <body>
 <header>
   <h1>REAL BRITAIN, AS DOOM LEVELS<small id="sub">postcode2wad</small></h1>
-  <p class="intro">Every square below is 800&nbsp;m of real England, generated
-  from Environment&nbsp;Agency 1&nbsp;m LIDAR and OpenStreetMap: real building
-  footprints at measured heights, sloped terrain, hedges, trees. Click a
-  square to walk it. <span class="k">WASD</span> moves and the mouse looks on a
-  desktop; phones get on-screen controls. Dark squares are the sea.</p>
+  <p class="intro">Every square on the map is 800&nbsp;m of real England,
+  generated from Environment&nbsp;Agency 1&nbsp;m LIDAR and OpenStreetMap: real
+  building footprints at measured heights, sloped terrain, hedges, trees. Drag
+  to pan, scroll to zoom, click a square to walk it. <span class="k">WASD</span>
+  moves and the mouse looks on a desktop; phones get on-screen controls.</p>
 </header>
 
-<div class="wip"><div><strong>Work in progress.</strong> Thanet is the only
+<div class="wrap wip"><div><strong>Work in progress.</strong> Thanet is the only
 district built so far &mdash; more regions are coming as the LIDAR for them is
 mirrored. Expect rough edges: this is a project in the open, not a finished
 product.</div></div>
 
-<div id="find">
-  <label for="pc" style="color:var(--dim)">Find your postcode:</label>
-  <input id="pc" placeholder="e.g. CT1 2EH" autocomplete="postal-code"
-         spellcheck="false" maxlength="9">
-  <button id="pcgo" type="button">Go</button>
-  <span id="pcmsg"></span>
+<div class="wrap">
+  <div id="find">
+    <label for="pc" style="color:var(--dim)">Find your postcode:</label>
+    <input id="pc" placeholder="e.g. CT1 2EH" autocomplete="postal-code"
+           spellcheck="false" maxlength="9">
+    <button id="pcgo" type="button">Go</button>
+    <span id="pcmsg"></span>
+  </div>
+
+  <div id="mapbox">
+    <canvas id="map" role="application"
+            aria-label="Map of built tiles. Drag to pan, scroll to zoom, click a tile to play it."
+            tabindex="0"></canvas>
+    <div class="ctrl tl" id="districts"></div>
+    <div class="ctrl tr">
+      <button id="zin"  title="Zoom in (+)">+</button>
+      <button id="zout" title="Zoom out (−)">&minus;</button>
+      <button id="zfit" title="Fit all built tiles" style="font-size:11px">fit</button>
+    </div>
+    <div id="readout"></div>
+    <div id="scalebar"></div>
+    <div id="maphint">loading coverage&hellip;</div>
+  </div>
 </div>
 
-<div id="districts"></div>
-<div id="mapwrap"><div id="grid"></div></div>
 <div id="tip"></div>
 
 <footer id="credits">
@@ -102,14 +130,80 @@ product.</div></div>
 </footer>
 
 <script>
+// ===========================================================================
+// Coverage map
+// ===========================================================================
+//
+// This replaced a CSS grid of one <div> per tile, which was fine for one
+// district and could not survive more. The grid was per-district, so two
+// districts could only ever be two separate grids behind two tabs — even when
+// they are neighbours in reality — and it put a DOM node and an <img> in the
+// document for every tile whether or not it was on screen. Thanet alone is 200
+// of each; the country is five figures.
+//
+// So: one canvas, one coordinate space, every district drawn into it.
+//
+// ---- Coordinate space -----------------------------------------------------
+//
+// The map's world coordinates ARE the British National Grid, in metres. That
+// is not a convenience, it is why districts compose for free: a tile's id
+// encodes `bng<size>-<ix>-<iy>`, and its south-west corner is exactly
+// (ix * size_m, iy * size_m) eastings/northings. Two districts built at
+// different tile sizes still land in the right place relative to each other,
+// because both are expressed in metres on the same national grid. Adding a
+// district is adding rows to districts.json — there is no stitching step and
+// no per-district layout.
+//
+// The camera is {e, n, ppm}: the world point at the centre of the viewport,
+// and a zoom expressed as *pixels per metre* — a real scale, which is what
+// lets the scale bar and the "fit" button be arithmetic rather than guesswork.
+//
+//   screen_x = (E - cam.e) * ppm + width/2
+//   screen_y = (cam.n - N) * ppm + height/2     <- northing grows *up*
+//
+// ---- Scaling to the whole country -----------------------------------------
+//
+// Three things keep this bounded as districts are added, and all three matter
+// once the tile count is in the thousands:
+//
+//   1. Viewport culling. Rendering walks the ix/iy range the viewport covers
+//      and looks each up in a Map, so cost is proportional to what is on
+//      screen, never to how much has been built.
+//   2. A zoom threshold. Below TILE_PX_FOR_IMAGE a tile is drawn as a flat
+//      block of colour instead of its minimap. Zoomed out over the country you
+//      want a coverage map, not ten thousand 256px PNGs.
+//   3. A bounded image cache with a per-frame load budget. Only visible tiles
+//      are fetched, only a few new ones per frame, nearest the centre first,
+//      and the cache evicts least-recently-drawn beyond IMAGE_CACHE_MAX. Pan
+//      across the country and memory stays flat.
+// ===========================================================================
+
+const canvas = document.getElementById('map');
+const ctx = canvas.getContext('2d', { alpha: false });
 const tip = document.getElementById('tip');
-const grid = document.getElementById('grid');
 const tabs = document.getElementById('districts');
 const sub = document.getElementById('sub');
+const readout = document.getElementById('readout');
+const scaleBar = document.getElementById('scalebar');
+const mapHint = document.getElementById('maphint');
 
-// Manifests are fetched once and shared: the grid needs the district you are
-// looking at, the postcode search needs every district at once to answer
-// "is this covered anywhere?".
+// Zoom limits, in pixels per metre. The minimaps are 256px for an 800m tile,
+// so 0.32 ppm is their native resolution — going far past it only magnifies
+// pixels, and MAX_PPM is set to allow some of that because it is useful for
+// picking a specific street, not because it adds detail.
+const MIN_PPM = 0.0015;   // ~670 m/px — most of Great Britain in view
+const MAX_PPM = 1.2;      // ~0.8 m/px
+const TILE_PX_FOR_IMAGE = 40;   // below this a tile is a coloured block
+const IMAGE_CACHE_MAX = 512;    // decoded minimaps held at once
+const LOADS_PER_FRAME = 6;      // new image requests started per render
+
+const cam = { e: 0, n: 0, ppm: 0.05 };
+let districts = [];       // [{slug, name, tiles, size_m, byPos, bounds}]
+let hover = null;         // {district, tile} under the cursor
+let frame = 0;            // render counter, used as the cache's LRU clock
+
+// ---- data -----------------------------------------------------------------
+
 const manifests = new Map();
 function manifest(slug) {
   if (!manifests.has(slug)) {
@@ -118,59 +212,317 @@ function manifest(slug) {
   return manifests.get(slug);
 }
 
-async function showDistrict(slug) {
-  const m = await manifest(slug);
-  const t = m.tiles;
-  const ixs = t.map(x => x.ix), iys = t.map(x => x.iy);
-  const x0 = Math.min(...ixs), x1 = Math.max(...ixs);
-  const y0 = Math.min(...iys), y1 = Math.max(...iys);
-  grid.innerHTML = '';
-  grid.style.gridTemplateColumns = `repeat(${x1 - x0 + 1}, 44px)`;
+async function loadDistrict(d) {
+  const m = await manifest(d.slug);
+  const size = m.size_m;
+  const byPos = new Map(m.tiles.map(t => [t.ix + ',' + t.iy, t]));
+  const ixs = m.tiles.map(t => t.ix), iys = m.tiles.map(t => t.iy);
+  return {
+    ...d,
+    size_m: size,
+    common_bytes: m.common_bytes,
+    byPos,
+    // In metres on the national grid, so districts share one bounding box.
+    bounds: {
+      e0: Math.min(...ixs) * size,       e1: (Math.max(...ixs) + 1) * size,
+      n0: Math.min(...iys) * size,       n1: (Math.max(...iys) + 1) * size,
+    },
+  };
+}
 
-  const byPos = new Map(t.map(x => [x.ix + ',' + x.iy, x]));
-  // Row order runs north to south, so the map reads like a map: iy grows
-  // northward in the national grid, screen rows grow downward.
-  for (let iy = y1; iy >= y0; iy--) {
-    for (let ix = x0; ix <= x1; ix++) {
-      const tile = byPos.get(ix + ',' + iy);
-      if (!tile) {
-        const s = document.createElement('div');
-        s.className = 'sea';
-        grid.appendChild(s);
-        continue;
+// ---- image cache ----------------------------------------------------------
+//
+// Keyed "slug/id". `used` is the frame number it was last drawn on, which is
+// all an LRU needs here — eviction runs after a render, so anything drawn this
+// frame is by definition safe.
+const images = new Map();
+let inFlight = 0;
+
+function tileImage(slug, id, wanted) {
+  const key = slug + '/' + id;
+  let rec = images.get(key);
+  if (rec) { rec.used = frame; return rec.img; }
+  if (!wanted || inFlight >= LOADS_PER_FRAME) return null;
+  const img = new Image();
+  rec = { img, used: frame, ok: false };
+  images.set(key, rec);
+  inFlight++;
+  img.onload = () => { rec.ok = true; inFlight--; render(); };
+  // A missing minimap must not retry forever: the record stays in the cache as
+  // a permanent negative so the block colour is used from then on.
+  img.onerror = () => { inFlight--; };
+  img.src = slug + '/minimaps/' + id + '.png';
+  return null;
+}
+
+function evictImages() {
+  if (images.size <= IMAGE_CACHE_MAX) return;
+  const byAge = [...images.entries()].sort((a, b) => a[1].used - b[1].used);
+  for (let i = 0; i < byAge.length - IMAGE_CACHE_MAX; i++) {
+    images.delete(byAge[i][0]);
+  }
+}
+
+// ---- projection -----------------------------------------------------------
+
+let vw = 0, vh = 0;   // CSS pixels
+
+function toScreen(E, N) {
+  return { x: (E - cam.e) * cam.ppm + vw / 2, y: (cam.n - N) * cam.ppm + vh / 2 };
+}
+function toWorld(x, y) {
+  return { e: cam.e + (x - vw / 2) / cam.ppm, n: cam.n - (y - vh / 2) / cam.ppm };
+}
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  // Backing store follows devicePixelRatio so the minimaps and text are not
+  // soft on a retina display; all drawing stays in CSS pixels.
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  vw = r.width; vh = r.height;
+  canvas.width = Math.round(vw * dpr);
+  canvas.height = Math.round(vh * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  render();
+}
+
+function fitAll() {
+  if (!districts.length) return;
+  const b = districts.reduce((a, d) => ({
+    e0: Math.min(a.e0, d.bounds.e0), e1: Math.max(a.e1, d.bounds.e1),
+    n0: Math.min(a.n0, d.bounds.n0), n1: Math.max(a.n1, d.bounds.n1),
+  }), { e0: Infinity, e1: -Infinity, n0: Infinity, n1: -Infinity });
+  fitBounds(b);
+}
+
+function fitBounds(b) {
+  cam.e = (b.e0 + b.e1) / 2;
+  cam.n = (b.n0 + b.n1) / 2;
+  const pad = 1.12;   // a little air around the edge
+  cam.ppm = clampPpm(Math.min(vw / ((b.e1 - b.e0) * pad),
+                              vh / ((b.n1 - b.n0) * pad)));
+  render();
+}
+
+const clampPpm = v => Math.max(MIN_PPM, Math.min(MAX_PPM, v));
+
+// ---- render ---------------------------------------------------------------
+
+function render() {
+  if (!vw) return;
+  frame++;
+  ctx.fillStyle = '#10141c';           // sea / nothing built
+  ctx.fillRect(0, 0, vw, vh);
+  // Minimaps are small and deliberately pixel-art; smoothing turns them to mush.
+  ctx.imageSmoothingEnabled = cam.ppm < 0.32;
+
+  const tl = toWorld(0, 0), br = toWorld(vw, vh);
+  let drawn = 0;
+  inFlight = Math.max(0, inFlight);
+
+  for (const d of districts) {
+    const px = d.size_m * cam.ppm;           // one tile, in screen pixels
+    const wantImage = px >= TILE_PX_FOR_IMAGE;
+    // Only the ix/iy actually on screen. This is the whole scaling story:
+    // panning over a country never touches a tile it is not showing.
+    const ix0 = Math.floor(tl.e / d.size_m), ix1 = Math.floor(br.e / d.size_m);
+    const iy0 = Math.floor(br.n / d.size_m), iy1 = Math.floor(tl.n / d.size_m);
+
+    for (let iy = iy0; iy <= iy1; iy++) {
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const t = d.byPos.get(ix + ',' + iy);
+        if (!t) continue;
+        const p = toScreen(ix * d.size_m, (iy + 1) * d.size_m);   // NW corner
+        // +1 closes the hairline seam sub-pixel positions leave between tiles.
+        const w = Math.ceil(px) + 1;
+        const img = wantImage ? tileImage(d.slug, t.id, true) : null;
+        const rec = images.get(d.slug + '/' + t.id);
+        if (img && rec && rec.ok) {
+          ctx.drawImage(img, p.x, p.y, w, w);
+        } else {
+          ctx.fillStyle = '#2b2f38';
+          ctx.fillRect(p.x, p.y, w, w);
+        }
+        drawn++;
       }
-      const b = document.createElement('a');
-      b.className = 'tile';
-      b.href = 'play.html?d=' + encodeURIComponent(slug)
-             + '&tile=' + encodeURIComponent(tile.id);
-      b.style.backgroundImage = `url(${slug}/minimaps/${tile.id}.png)`;
-      b.addEventListener('mousemove', ev => {
-        tip.style.display = 'block';
-        tip.style.left = Math.min(ev.clientX + 14, innerWidth - 190) + 'px';
-        tip.style.top = (ev.clientY + 14) + 'px';
-        tip.innerHTML = '<div class="t">' + tile.title + '</div>'
-          + '<div class="d">' + tile.buildings + ' buildings &middot; '
-          + tile.trees + ' trees &middot; '
-          + ((tile.bytes + m.common_bytes) / 1e6).toFixed(1) + ' MB</div>';
-      });
-      b.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
-      grid.appendChild(b);
     }
   }
-  sub.textContent = m.district + ' — ' + t.length + ' playable squares';
+
+  if (hover) {
+    const d = hover.district, t = hover.tile;
+    const p = toScreen(t.ix * d.size_m, (t.iy + 1) * d.size_m);
+    const w = d.size_m * cam.ppm;
+    ctx.strokeStyle = '#c44';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x + 1, p.y + 1, w - 2, w - 2);
+  }
+
+  mapHint.style.display = drawn ? 'none' : '';
+  if (!drawn && districts.length) {
+    mapHint.textContent = 'no built tiles in view — press "fit"';
+  }
+  drawScaleBar();
+  evictImages();
 }
+
+// A round number of metres that lands near 120px, so the bar is always a
+// figure a human can read off rather than "93 m".
+function drawScaleBar() {
+  const target = 120 / cam.ppm;
+  const pow = Math.pow(10, Math.floor(Math.log10(target)));
+  const nice = [1, 2, 5, 10].map(k => k * pow).find(v => v >= target) || 10 * pow;
+  const label = nice >= 1000 ? (nice / 1000) + ' km' : nice + ' m';
+  scaleBar.innerHTML = label + '<i style="width:' + (nice * cam.ppm) + 'px"></i>';
+}
+
+// ---- interaction ----------------------------------------------------------
+
+function tileAt(x, y) {
+  const w = toWorld(x, y);
+  for (const d of districts) {
+    const ix = Math.floor(w.e / d.size_m), iy = Math.floor(w.n / d.size_m);
+    const t = d.byPos.get(ix + ',' + iy);
+    if (t) return { district: d, tile: t };
+  }
+  return null;
+}
+
+const playHref = (d, t) =>
+  'play.html?d=' + encodeURIComponent(d.slug) + '&tile=' + encodeURIComponent(t.id);
+
+let drag = null;
+let moved = 0;
+
+canvas.addEventListener('pointerdown', ev => {
+  canvas.setPointerCapture(ev.pointerId);
+  drag = { x: ev.clientX, y: ev.clientY };
+  moved = 0;
+  canvas.classList.add('drag');
+});
+
+canvas.addEventListener('pointermove', ev => {
+  const r = canvas.getBoundingClientRect();
+  if (drag) {
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    moved += Math.abs(dx) + Math.abs(dy);
+    cam.e -= dx / cam.ppm;
+    cam.n += dy / cam.ppm;
+    drag = { x: ev.clientX, y: ev.clientY };
+    render();
+    return;
+  }
+  const hit = tileAt(ev.clientX - r.left, ev.clientY - r.top);
+  const w = toWorld(ev.clientX - r.left, ev.clientY - r.top);
+  readout.innerHTML = 'OSGB <b>' + Math.round(w.e) + 'E ' + Math.round(w.n) + 'N</b>'
+    + (hit ? '<br><b>' + hit.tile.title + '</b>' : '');
+  if (hit !== hover && (!hit || !hover || hit.tile.id !== hover.tile.id)) {
+    hover = hit;
+    render();
+  }
+  if (hit) {
+    const m = hit.district;
+    tip.style.display = 'block';
+    tip.style.left = Math.min(ev.clientX + 14, innerWidth - 200) + 'px';
+    tip.style.top = (ev.clientY + 14) + 'px';
+    tip.innerHTML = '<div class="t">' + hit.tile.title + '</div>'
+      + '<div class="d">' + hit.tile.buildings + ' buildings &middot; '
+      + hit.tile.trees + ' trees &middot; '
+      + ((hit.tile.bytes + m.common_bytes) / 1e6).toFixed(1) + ' MB</div>';
+  } else {
+    tip.style.display = 'none';
+  }
+});
+
+function endDrag(ev) {
+  if (!drag) return;
+  drag = null;
+  canvas.classList.remove('drag');
+  // A drag that happened to end over a tile is not a click on it. 6px of slop
+  // because a mouse always moves a little between press and release, and a
+  // finger moves more.
+  if (moved < 6) {
+    const r = canvas.getBoundingClientRect();
+    const hit = tileAt(ev.clientX - r.left, ev.clientY - r.top);
+    if (hit) location.href = playHref(hit.district, hit.tile);
+  }
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', () => { drag = null; canvas.classList.remove('drag'); });
+canvas.addEventListener('pointerleave', () => { tip.style.display = 'none'; hover = null; render(); });
+
+// Zoom about the cursor: the world point under the pointer must not move, or
+// zooming feels like it is fighting you.
+canvas.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  zoomAbout(ev.clientX - r.left, ev.clientY - r.top,
+            Math.pow(1.0015, -ev.deltaY));
+}, { passive: false });
+
+function zoomAbout(x, y, factor) {
+  const before = toWorld(x, y);
+  cam.ppm = clampPpm(cam.ppm * factor);
+  const after = toWorld(x, y);
+  cam.e += before.e - after.e;
+  cam.n += before.n - after.n;
+  render();
+}
+
+document.getElementById('zin').onclick  = () => zoomAbout(vw / 2, vh / 2, 1.6);
+document.getElementById('zout').onclick = () => zoomAbout(vw / 2, vh / 2, 1 / 1.6);
+document.getElementById('zfit').onclick = fitAll;
+
+// Keyboard, because a canvas is otherwise a dead end for anyone not using a
+// mouse. The postcode box remains the accessible way to reach a specific tile.
+canvas.addEventListener('keydown', ev => {
+  const step = 60 / cam.ppm;
+  const k = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[ev.key];
+  if (k) { cam.e += k[0] * step; cam.n += k[1] * step; render(); ev.preventDefault(); }
+  else if (ev.key === '+' || ev.key === '=') zoomAbout(vw / 2, vh / 2, 1.6);
+  else if (ev.key === '-') zoomAbout(vw / 2, vh / 2, 1 / 1.6);
+});
+
+// Pinch zoom. Pointer events give every active touch, so tracking two of them
+// and watching the distance between is enough — no gesture library.
+const touches = new Map();
+let pinchDist = 0;
+canvas.addEventListener('pointerdown', ev => {
+  if (ev.pointerType !== 'touch') return;
+  touches.set(ev.pointerId, ev);
+  if (touches.size === 2) { drag = null; pinchDist = spread(); }
+});
+canvas.addEventListener('pointermove', ev => {
+  if (ev.pointerType !== 'touch' || !touches.has(ev.pointerId)) return;
+  touches.set(ev.pointerId, ev);
+  if (touches.size === 2 && pinchDist) {
+    const d = spread();
+    const [a, b] = [...touches.values()];
+    const r = canvas.getBoundingClientRect();
+    zoomAbout((a.clientX + b.clientX) / 2 - r.left,
+              (a.clientY + b.clientY) / 2 - r.top, d / pinchDist);
+    pinchDist = d;
+  }
+});
+for (const e of ['pointerup', 'pointercancel', 'pointerleave']) {
+  canvas.addEventListener(e, ev => { touches.delete(ev.pointerId); pinchDist = 0; });
+}
+function spread() {
+  const [a, b] = [...touches.values()];
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+addEventListener('resize', resize);
 
 // ---- postcode search ------------------------------------------------------
 //
 // A postcode is only a way of naming a coordinate, so this resolves it to a
-// national-grid easting/northing and asks whether any built tile covers it.
-// Tile ids are `bng<size>-<ix>-<iy>` with ix = easting / size_m, so the test
-// is exact arithmetic against the manifest rather than a distance search.
+// national-grid easting/northing and asks whether any built tile covers it —
+// exact arithmetic against the manifests, not a nearest search.
 //
-// The "not covered" answer matters as much as the hit: most of the UK is not
-// built yet, and a lookup that just failed would read as a broken site rather
-// than as the honest state of the project.
-let districtList = [];
+// The "not covered" answer matters as much as the hit. Most of the country is
+// not built, and a lookup that merely failed would read as a broken site. It
+// names the district, says more regions are coming, and *pans the map there*
+// so the answer is visible rather than only stated.
 const pcInput = document.getElementById('pc');
 const pcGo = document.getElementById('pcgo');
 const pcMsg = document.getElementById('pcmsg');
@@ -188,50 +540,40 @@ async function findPostcode() {
   try {
     const r = await fetch('https://api.postcodes.io/postcodes/'
                           + encodeURIComponent(raw.replace(/\s+/g, '')));
-    if (r.status === 404) {
-      says('No such UK postcode — check the spelling.', 'err');
-      return;
-    }
+    if (r.status === 404) { says('No such UK postcode — check the spelling.', 'err'); return; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const res = (await r.json()).result;
 
-    // Two different "not on the British grid" cases, and both must be caught
-    // before the tile arithmetic runs.
-    //
-    // The islands get a zeroed grid reference rather than a missing one, so a
-    // 0 means "no GB grid", not a postcode at the grid origin off Land's End.
-    //
-    // Northern Ireland is the dangerous one: it comes back with *populated*
-    // eastings and northings on the Irish grid, whose numbers overlap the
-    // British grid's range. Belfast currently answers "coming soon" only
-    // because its Irish-grid coordinate happens to miss Thanet — add a
-    // district in the wrong place and an NI postcode would match a tile in
-    // Kent and cheerfully load it. The LIDAR is Environment Agency, England
-    // only, so anything outside GB is out of scope regardless.
+    // Two different "not on the British grid" cases, both caught before the
+    // tile arithmetic. The islands come back with a *zeroed* grid reference
+    // rather than a missing one. Northern Ireland is the dangerous one: it
+    // comes back populated, on the *Irish* grid, whose numbers overlap the
+    // British one — so without this an NI postcode could match a GB tile and
+    // cheerfully load it. The LIDAR is Environment Agency, England only.
     if (res.country === 'Northern Ireland' || !res.eastings || !res.northings) {
       says(`${res.postcode} is outside the British National Grid, `
            + 'so there is no Environment Agency LIDAR for it.', 'warn');
       return;
     }
 
-    for (const d of districtList) {
-      const m = await manifest(d.slug);
-      const ix = Math.floor(res.eastings / m.size_m);
-      const iy = Math.floor(res.northings / m.size_m);
-      const hit = m.tiles.find(t => t.ix === ix && t.iy === iy);
+    for (const d of districts) {
+      const ix = Math.floor(res.eastings / d.size_m);
+      const iy = Math.floor(res.northings / d.size_m);
+      const hit = d.byPos.get(ix + ',' + iy);
       if (hit) {
         says(`${res.postcode} → ${hit.title}. Loading…`);
-        location.href = 'play.html?d=' + encodeURIComponent(d.slug)
-                      + '&tile=' + encodeURIComponent(hit.id);
+        location.href = playHref(d, hit);
         return;
       }
     }
 
-    // Name the place rather than saying "not found": it is the difference
-    // between "this site is broken" and "your area is not built yet".
     const where = res.admin_district || res.country || 'That area';
     says(`${res.postcode} is in ${where}, which isn't built yet — `
          + 'more regions coming soon.', 'warn');
+    // Show them where they are relative to what exists.
+    cam.e = res.eastings; cam.n = res.northings;
+    cam.ppm = clampPpm(0.004);
+    render();
   } catch (err) {
     says('Postcode lookup is unavailable right now — '
          + 'pick a square from the map instead.', 'err');
@@ -241,24 +583,35 @@ async function findPostcode() {
 }
 
 pcGo.addEventListener('click', findPostcode);
-pcInput.addEventListener('keydown', ev => {
-  if (ev.key === 'Enter') findPostcode();
-});
+pcInput.addEventListener('keydown', ev => { if (ev.key === 'Enter') findPostcode(); });
 
-fetch('districts.json').then(r => r.json()).then(listing => {
-  const ds = districtList = listing.districts;
-  for (const d of ds) {
+// ---- boot -----------------------------------------------------------------
+
+fetch('districts.json').then(r => r.json()).then(async listing => {
+  districts = await Promise.all(listing.districts.map(loadDistrict));
+  const total = districts.reduce((n, d) => n + d.byPos.size, 0);
+  sub.textContent = districts.map(d => d.name).join(', ')
+    + ' — ' + total + ' playable square' + (total === 1 ? '' : 's');
+
+  // One button per district that flies to it. With everything on one national
+  // grid these are viewport bookmarks, not separate maps — which is the point:
+  // neighbouring districts will simply appear next to each other.
+  for (const d of districts) {
     const b = document.createElement('button');
-    b.textContent = d.name + ' (' + d.tiles + ')';
+    b.textContent = d.name + ' (' + d.byPos.size + ')';
     b.onclick = () => {
       tabs.querySelectorAll('button').forEach(x => x.classList.remove('on'));
       b.classList.add('on');
-      showDistrict(d.slug);
+      fitBounds(d.bounds);
     };
     tabs.appendChild(b);
   }
-  if (ds.length) tabs.firstChild.click();
-  if (ds.length < 2) tabs.style.display = 'none';
+  if (districts.length < 2) tabs.style.display = 'none';
+
+  resize();
+  fitAll();
+}).catch(() => {
+  mapHint.textContent = 'could not load coverage';
 });
 </script>
 </body>
