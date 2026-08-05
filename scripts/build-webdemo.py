@@ -79,7 +79,7 @@ ENGINE_FILES = [
 IWAD = "freedoom2.wad"
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "webdemo"
-TEMPLATE_FILES = ["index.html", "play.html", "_headers", "serve.py"]
+TEMPLATE_FILES = ["index.html", "play.html", "favicon.svg", "_headers", "serve.py"]
 
 #: Files pre-compressed for upload, and why only these two. Cloudflare
 #: auto-compresses a fixed content-type list: `.wasm` and `.js` are on it and

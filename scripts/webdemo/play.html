@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,
       maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>postcode2wad — loading tile</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
   html,body{margin:0;height:100%;background:#0b0b0c;color:#dcdcdc;
             font:12px ui-monospace,Consolas,monospace;overflow:hidden;
@@ -181,7 +182,7 @@ const CORE = ['engine/uzdoom.pk3', 'engine/game_support.pk3',
 // for a month while the bucket held the new one, and nothing anywhere would
 // look wrong. `play.html` itself is on the short rule, so bumping this
 // propagates in 15 minutes. **Bump it whenever the tile PK3s change.**
-const PK3_V = '20260805a';
+const PK3_V = '20260805b';
 
 // URL parameter -> the cvar the PK3's CVARINFO declares for it. Names must
 // match hud.py's ENTRY_CVARS exactly; a typo here is silent, because a

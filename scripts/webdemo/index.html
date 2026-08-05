@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>postcode2wad — walk real Britain in Doom</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
   :root{--bg:#0b0b0c;--panel:#131316;--border:#2a2a30;--text:#dcdcdc;
         --dim:#8a8a92;--accent:#c44;--sea:#10141c}
@@ -712,14 +713,27 @@ fetch('districts.json').then(r => r.json()).then(async listing => {
   // grid squares intersecting its boundary and so overhang it. The wording
   // says "rebuilt as playable Doom" rather than naming a place, because the
   // honest claim is about how much map exists, not how much of Kent it is.
-  if (listing.total_km2) {
+  // districts.json is the source, but it is not trusted to be there: it and
+  // this page are separate files on a CDN and a deploy can land them out of
+  // order, which is exactly how this shipped once — the headline live and the
+  // figure not, rendering as a bare em-dash. So fall back to computing it from
+  // the manifests, which are already loaded because the map needs them and
+  // which carry the same two numbers. Same arithmetic as build-webdemo.py:
+  // tiles built times tile area.
+  const km2 = listing.total_km2
+    || districts.reduce((a, d) => a + d.byPos.size * d.size_m ** 2 / 1e6, 0);
+  const tiles = listing.tiles_total || total;
+
+  const headline = document.querySelector('.headline');
+  if (km2 > 0) {
     document.getElementById('area').textContent =
-      listing.total_km2.toLocaleString(undefined, { maximumFractionDigits: 0 })
-      + ' km²';
+      km2.toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' km²';
     document.getElementById('areatiles').textContent =
-      'across ' + listing.tiles_total.toLocaleString() + ' tiles in '
-      + listing.districts.length
-      + ' district' + (listing.districts.length === 1 ? '' : 's');
+      'across ' + tiles.toLocaleString() + ' tiles in ' + districts.length
+      + ' district' + (districts.length === 1 ? '' : 's');
+  } else if (headline) {
+    // Nothing worth claiming: say nothing rather than show a dash.
+    headline.style.display = 'none';
   }
 
   // One button per district that flies to it. With everything on one national
@@ -741,6 +755,9 @@ fetch('districts.json').then(r => r.json()).then(async listing => {
   fitAll();
 }).catch(() => {
   mapHint.textContent = 'could not load coverage';
+  // Claim nothing if we could not load what backs the claim.
+  const headline = document.querySelector('.headline');
+  if (headline) headline.style.display = 'none';
 });
 </script>
 </body>

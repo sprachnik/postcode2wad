@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"
+     shape-rendering="crispEdges">
+  <!-- A globe at 16px, drawn deliberately blocky: `crispEdges` turns off
+       antialiasing so the disc reads as pixel art rather than as a soft blob,
+       which is what the rest of the site looks like and what an SVG scaled
+       down to a 16px tab slot survives best as.
+
+       The two colours are the site's own: #1f3a5a and #4a6b3a are the sea and
+       grass entries of the land-cover palette on the coverage map, so the tab
+       icon and the tooltip bars agree without anyone having to remember to
+       keep them in step. -->
+  <circle cx="8" cy="8" r="7" fill="#1f3a5a"/>
+  <g fill="#4a6b3a">
+    <rect x="4" y="3" width="4" height="2"/>
+    <rect x="3" y="5" width="3" height="2"/>
+    <rect x="9" y="4" width="3" height="3"/>
+    <rect x="6" y="8" width="4" height="3"/>
+    <rect x="10" y="9" width="2" height="2"/>
+    <rect x="3" y="9" width="2" height="2"/>
+    <rect x="7" y="12" width="3" height="1"/>
+  </g>
+</svg>
