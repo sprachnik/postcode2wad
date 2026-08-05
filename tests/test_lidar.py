@@ -148,19 +148,35 @@ def test_a_missing_square_falls_back_whole_rather_than_half(store, capsys):
 
 
 def test_the_dsm_gap_over_TR_is_named_not_just_missed(tmp_path, capsys):
-    """The EA publishes no 1m last-return DSM raster for any TR tile — 72 of
+    """The EA publishes no 1m *last-return* DSM raster for any TR tile — 72 of
     Kent's 191 squares, including all of Thanet, Canterbury and Dover. Trees
     come from DSM minus DTM, so a mirror that treated that as an ordinary
     absence would hand back tree-less maps for half the county without a word.
+
+    Pinned against LAST_RETURN_DSM by name rather than against whatever `DSM`
+    currently points at. The build moved to first return on 5 Aug precisely
+    because of this gap, which would otherwise have quietly retired the test
+    that documents it — and the defect is still there, still unannounced by the
+    EA, and still waiting for anyone who switches back.
     """
     lidar.TALLY.reset()
-    assert lidar._mosaic_local(lidar.DSM, STRADDLE_BBOX, tmp_path) is None
+    assert lidar._mosaic_local(lidar.LAST_RETURN_DSM, STRADDLE_BBOX, tmp_path) is None
 
     shouted = capsys.readouterr().err
     assert "TR" in shouted
     assert "packaging defect" in shouted
     # The DTM has no such defect and must not borrow the excuse.
     assert "TR" in lidar.DTM.broken_squares or not lidar.DTM.broken_squares
+
+
+def test_the_dsm_in_use_covers_TR():
+    """The reason for the switch, stated as an assertion: whatever `DSM` points
+    at must be bulk-fetchable over TR, or half of Kent silently goes back to one
+    WCS round trip per tile."""
+    assert "TR" not in lidar.DSM.broken_squares, (
+        f"{lidar.DSM.label} cannot be mirrored over TR — eastern Kent would "
+        f"fetch DSM over the network for every tile"
+    )
 
 
 def test_a_wrongly_placed_file_is_refused(store):

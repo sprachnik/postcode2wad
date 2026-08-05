@@ -87,41 +87,81 @@ def district_tiles(name: str) -> list[str]:
     return sorted(set(tiles))
 
 
+#: Attempts per tile, and the base for exponential backoff between them.
+#:
+#: Every one of these paths was a *transient* failure observed on 5 Aug while
+#: mirroring 30 squares, and every one was reported as permanent:
+#:
+#:   - At 4 workers the API returned 404 for all 30 tiles in six seconds. At 3
+#:     it served 28, and the remaining 2 came back on a single-worker retry.
+#:     Nothing was missing; the endpoint was throttling and 404 is how it says
+#:     so. `docs/lidar-bulk.md` had already probed all 191 Kent squares and
+#:     found 191/191 present, and that finding stands.
+#:   - One tile arrived as a 0.6 MB unreadable zip and retried clean at 41.6 MB.
+#:   - One run died outright on a ChunkedEncodingError mid-download.
+#:
+#: Reported as MISSING/BAD ZIP/traceback, those three produce a half-mirror
+#: that looks like a coverage report. Every build timed against it is then
+#: silently network-bound, which is the exact failure this project keeps
+#: paying for. Over 191 squares it is a certainty rather than a risk.
+ATTEMPTS = 4
+BACKOFF_S = 5.0
+
+
 def fetch_tile(tile: str, product: str, year: str, res: str, directory: Path) -> tuple[str, str]:
-    """Download one grid tile. Returns (tile, outcome)."""
+    """Download one grid tile, retrying transient failures. Returns (tile, outcome)."""
     target = local_tile_path(directory, product, year, res, tile)
     if target.exists():
         return tile, f"have {target.stat().st_size / 1e6:.1f} MB"
 
     url = f"{BASE}/{product}/{year}/{res}/{tile}"
     started = time.time()
-    response = requests.get(
-        url,
-        params={"subscription-key": SUBSCRIPTION_KEY},
-        headers={"User-Agent": USER_AGENT},
-        timeout=TIMEOUT,
-    )
-    if response.status_code == 404:
-        return tile, "MISSING (404)"
-    response.raise_for_status()
-    payload = response.content
+    last = "no attempt made"
 
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(payload))
-    except zipfile.BadZipFile:
-        return tile, f"BAD ZIP ({len(payload)} bytes)"
+    for attempt in range(ATTEMPTS):
+        if attempt:
+            time.sleep(BACKOFF_S * (2 ** (attempt - 1)))
+        try:
+            response = requests.get(
+                url,
+                params={"subscription-key": SUBSCRIPTION_KEY},
+                headers={"User-Agent": USER_AGENT},
+                timeout=TIMEOUT,
+            )
+            # 404 is not proof of absence here — see ATTEMPTS. Retry it like any
+            # other transient, and only call it missing once the budget is out.
+            if response.status_code in (404, 429, 500, 502, 503, 504):
+                last = f"HTTP {response.status_code}"
+                continue
+            response.raise_for_status()
+            payload = response.content
+        except requests.RequestException as exc:
+            # Covers ChunkedEncodingError/IncompleteRead, which killed a whole
+            # run rather than one tile.
+            last = f"{type(exc).__name__}"
+            continue
 
-    rasters = [n for n in archive.namelist() if n.lower().endswith(".tif")]
-    if not rasters:
-        # Not hypothetical: 72 of Kent's 191 tiles do this for the 1m
-        # last-return DSM. Say so rather than leaving a silent hole.
-        return tile, f"METADATA-ONLY, no .tif in {archive.namelist()}"
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(payload))
+        except zipfile.BadZipFile:
+            last = f"truncated ({len(payload)} bytes)"
+            continue
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    data = archive.read(rasters[0])
-    target.write_bytes(data)
-    elapsed = time.time() - started
-    return tile, f"{len(data) / 1e6:.1f} MB in {elapsed:.0f}s ({rasters[0]})"
+        rasters = [n for n in archive.namelist() if n.lower().endswith(".tif")]
+        if not rasters:
+            # This one really is terminal: a well-formed zip with no raster is
+            # the EA's packaging defect, not a network problem. 72 of Kent's 191
+            # squares do this for the 1m last-return DSM. Do not burn retries.
+            return tile, f"METADATA-ONLY, no .tif in {archive.namelist()}"
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = archive.read(rasters[0])
+        target.write_bytes(data)
+        elapsed = time.time() - started
+        note = f" after {attempt + 1} attempts" if attempt else ""
+        return tile, f"{len(data) / 1e6:.1f} MB in {elapsed:.0f}s ({rasters[0]}){note}"
+
+    return tile, f"FAILED after {ATTEMPTS} attempts, last: {last}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,7 +173,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--year", default="2022")
     parser.add_argument("--res", default="1", help="resolution in metres")
     parser.add_argument("--dir", default=str(DEFAULT_LIDAR_DIR), metavar="DIR")
-    parser.add_argument("--workers", type=int, default=4)
+    # 3, not 4. Measured 5 Aug on the same 30 squares: 4 workers got 0 and 3
+    # got 28. The endpoint throttles somewhere between the two and says so with
+    # a 404, so a higher default does not go faster — it goes nowhere.
+    parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 

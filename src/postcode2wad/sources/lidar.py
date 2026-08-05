@@ -103,8 +103,8 @@ DTM = Coverage(
 
 # Note the asymmetric slug — it is "...-last-return-dsm-1m", not "...-dsm-1m",
 # which 404s.
-DSM = Coverage(
-    label="DSM",
+LAST_RETURN_DSM = Coverage(
+    label="DSM(last)",
     wcs_url=(
         "https://environment.data.gov.uk/spatialdata/"
         "lidar-composite-digital-surface-model-last-return-dsm-1m/wcs"
@@ -144,6 +144,25 @@ FIRST_RETURN_DSM = Coverage(
     year="2022",
     resolution="1",
 )
+
+#: The DSM the build uses. First return, decided 5 Aug 2026.
+#:
+#: Last return is the more natural choice for building heights — it is the
+#: surface the pulse reached last, so it sees through canopy — but it cannot be
+#: bulk-fetched for TR at 1m, and TR is Thanet, Canterbury, Dover and
+#: Folkestone. Keeping it would mean either a per-tile WCS round trip for half
+#: the county (~5 hours over a Kent build, and the network dependency that made
+#: every earlier timing misleading) or running the two halves of Kent off
+#: different surfaces, which is a difference nothing would surface until
+#: somebody compared tiles across the Medway.
+#:
+#: The A/B said the cost is small. Birchington, 500 buildings: mean height
+#: 6.36m -> 6.40m, median 6.63 -> 6.66, and the whole distribution moves less
+#: than a tenth of Doom's 24-unit step limit. Trees rise ~11% uncapped, since
+#: first return sits on canopy rather than through it. 50 of the 500 buildings
+#: differ by more than 0.5m, worst 5.26m — canopy overhanging a roof, which is
+#: the one artefact to remember if a building ever reads too tall.
+DSM = FIRST_RETURN_DSM
 
 #: The GeoTIFF's declared NODATA. Anything at or below this is a hole.
 NODATA_THRESHOLD = -1e30
