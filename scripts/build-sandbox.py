@@ -30,6 +30,7 @@ from shapely.geometry import box
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from postcode2wad import UNITS_PER_METRE, art, pk3, textures
+from postcode2wad.build import RAIL_GAUGE_M, RAIL_HEIGHT_UNITS, RAIL_WIDTH_M
 from postcode2wad.geometry import SectorSpec, Thing, build_geometry
 from postcode2wad.udmf import emit_textmap
 
@@ -300,7 +301,7 @@ def build() -> tuple[str, str]:
             ("residential 6m", textures.ROAD, 6.0, -0.25),
             ("pavement 2m", textures.PAVEMENT, 2.0, 0.0),
             ("footway 1.5m", textures.PAVEMENT, 1.5, 0.0),
-            ("railway 9m (ballast)", textures.BALLAST, 9.0, -0.25),
+            ("railway 9m (ballast + rails)", textures.BALLAST, 9.0, -0.25),
         ]
     ):
         y = road_y + index * 6.0
@@ -314,6 +315,30 @@ def build() -> tuple[str, str]:
                 light=200,
             )
         )
+        # The rails, on the railway strip only. Same geometry the real build
+        # lays: two thin sectors a standard gauge apart, standing proud of the
+        # sleepers. A ballast strip on its own reads as a gravel path, which is
+        # exactly how it was reported.
+        if flat == textures.BALLAST:
+            centre = y + width_m / 2
+            for side in (-1, 1):
+                ry = centre + side * RAIL_GAUGE_M / 2
+                specs.append(
+                    SectorSpec(
+                        polygon=box(
+                            GAP * M,
+                            (ry - RAIL_WIDTH_M / 2) * M,
+                            (GAP + 90) * M,
+                            (ry + RAIL_WIDTH_M / 2) * M,
+                        ),
+                        floor=round(drop_m * M) + RAIL_HEIGHT_UNITS,
+                        ceiling=sky,
+                        floor_tex=textures.RAIL_HEAD,
+                        wall_tex=textures.RAIL_HEAD,
+                        light=200,
+                        thin=True,
+                    )
+                )
         legend.append(f"  {index + 1:2d}. {label}")
 
     # --- row 8: sloped ground, which is how all real terrain renders --------

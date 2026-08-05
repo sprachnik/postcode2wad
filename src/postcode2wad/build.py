@@ -53,6 +53,16 @@ SKY_CLEARANCE = 12288  # 384m
 #: Deliberately above the Shard (310m); see the note at the measurement.
 MAX_MEASURED_HEIGHT_M = 350.0
 
+#: Standard gauge, and how the rails are drawn. 1.435m is the gauge of every
+#: main line in Britain; 0.14m is generous for a 7cm rail head but a hair-thin
+#: sector disappears at any distance, and the point of drawing them at all is
+#: that a railway should be identifiable as one.
+RAIL_GAUGE_M = 1.435
+RAIL_WIDTH_M = 0.14
+#: Rail head above the sleeper, in map units. 5 units is 16cm — proud enough to
+#: catch the light, far below the 24-unit step so it never blocks the player.
+RAIL_HEIGHT_UNITS = 5
+
 #: Roads sit a kerb's depth below the surrounding ground.
 KERB_UNITS = 8
 WATER_DEPTH_UNITS = 20
@@ -633,6 +643,56 @@ def build_tile(
                     sloped=with_slopes,
                 )
             )
+        # The rails themselves. Without them a railway is a grey strip and
+        # reads as a gravel path — reported from the sandbox as "I don't see
+        # anything I can identify as a railway line".
+        #
+        # These have to be geometry rather than paint: a flat tiles in both
+        # axes, so rails drawn into DMRAIL would repeat across the track as
+        # well as along it. That is the same reason road centre lines are
+        # expensive — but a tile carries 0-4 railway ways against 90-300 roads,
+        # so here it costs a handful of sectors instead of thousands.
+        #
+        # 1.435m apart is standard gauge, measured between the inside faces.
+        # `thin` because a rail is 7cm wide and sliver absorption would
+        # otherwise swallow it, exactly as it would a fence.
+        if shape.centre is not None:
+            for side in (-1, 1):
+                rail = shape.centre.parallel_offset(
+                    side * RAIL_GAUGE_M * UNITS_PER_METRE / 2.0, "left"
+                )
+                # An offset can come back empty where the centreline doubles
+                # back on itself; the ballast still stands, it just has no rail.
+                if rail.is_empty:
+                    continue
+                for part in getattr(rail, "geoms", [rail]):
+                    if part.length <= 0:
+                        continue
+                    strip = part.buffer(
+                        RAIL_WIDTH_M * UNITS_PER_METRE / 2.0, cap_style=2, join_style=2
+                    )
+                    strip = strip.intersection(shape.polygon)
+                    if strip.is_empty:
+                        continue
+                    for piece, elevation_m in _split_by_bands(
+                        strip, bands, terrain_at, with_slopes
+                    ):
+                        specs.append(
+                            SectorSpec(
+                                polygon=piece,
+                                # Rail head stands proud of the sleeper, which
+                                # is what catches the light and says "railway".
+                                floor=round(elevation_m * UNITS_PER_METRE)
+                                - KERB_UNITS
+                                + RAIL_HEIGHT_UNITS,
+                                ceiling=sky_height,
+                                floor_tex=textures.RAIL_HEAD,
+                                cover="rail",
+                                wall_tex=textures.RAIL_HEAD,
+                                light=ROAD_LIGHT,
+                                thin=True,
+                            )
+                        )
         stats.railways += 1
 
     if with_barriers:

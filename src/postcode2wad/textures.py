@@ -36,6 +36,8 @@ WATER = "DMWATER"
 CHALK = "DMCHALK"
 MARSH = "DMMARSH"
 BALLAST = "DMRAIL"
+#: The rail head itself — polished steel, drawn as its own thin sector.
+RAIL_HEAD = "DMRAILH"
 #: Seen from above, a clipped hedge is just dense foliage.
 HEDGE_TOP = WOODLAND
 

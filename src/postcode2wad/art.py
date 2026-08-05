@@ -222,6 +222,8 @@ GROUNDS = (
     # had a station and no track before this existed.
     Ground("DMRAIL", (104, 100, 96), blotch=0.13, grain=0.20, cells=9,
            stripes=(64, 0.14)),
+    # The rail head: worn steel, near-uniform because it is polished by traffic.
+    Ground("DMRAILH", (168, 170, 176), blotch=0.04, grain=0.05, cells=2),
 )
 
 GROUND_BY_NAME = {ground.name: ground for ground in GROUNDS}
