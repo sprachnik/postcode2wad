@@ -59,9 +59,16 @@ MAX_MEASURED_HEIGHT_M = 350.0
 #: that a railway should be identifiable as one.
 RAIL_GAUGE_M = 1.435
 RAIL_WIDTH_M = 0.14
-#: Rail head above the sleeper, in map units. 5 units is 16cm — proud enough to
-#: catch the light, far below the 24-unit step so it never blocks the player.
-RAIL_HEIGHT_UNITS = 5
+#: Rail head above the sleeper, in map units.
+#:
+#: 2 units is 6cm. A real rail stands about 16cm proud, which is what this was
+#: set to, and it read as too tall in Birchington — the rails looked like low
+#: kerbs running down the track rather than lines on it. The honest reason is
+#: that a rail is also only 7cm *wide*, and the width has to be exaggerated to
+#: 14cm to survive at any distance; keeping the height at life size next to a
+#: doubled width makes the section square instead of flat. Halving it restores
+#: the proportion that reads as rail.
+RAIL_HEIGHT_UNITS = 2
 
 #: Roads sit a kerb's depth below the surrounding ground.
 KERB_UNITS = 8
