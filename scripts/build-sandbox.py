@@ -63,6 +63,22 @@ BUILDINGS = [
     ("tower 310m (Shard height)", {"building": "commercial"}, 310.0, 2500.0),
 ]
 
+#: Historic and civic specimens. These route through the `historic` /
+#: place_of_worship branch rather than the building= table, which is how
+#: Canterbury Cathedral gets a cathedral's façade without anyone naming it:
+#: it is tagged, so it is styled. Worth its own row because that branch is easy
+#: to break and impossible to notice breaking on a real tile.
+HISTORIC = [
+    ("cathedral (tagged building=)", {"building": "cathedral"}, 32.0, 4000.0),
+    ("church, place_of_worship", {"amenity": "place_of_worship"}, 14.0, 400.0),
+    ("chapel", {"building": "chapel"}, 8.0, 150.0),
+    ("historic=* (any)", {"building": "yes", "historic": "yes"}, 10.0, 200.0),
+    ("castle", {"building": "yes", "historic": "castle"}, 22.0, 1500.0),
+    ("ruins", {"building": "yes", "historic": "ruins"}, 5.0, 120.0),
+    ("windmill", {"building": "yes", "historic": "windmill"}, 16.0, 60.0),
+    ("lighthouse", {"building": "yes", "historic": "lighthouse"}, 26.0, 50.0),
+]
+
 
 #: Barrier specimens — the extruded, thin things. A barrier is 15cm wide in
 #: life, so these are drawn at a legible 0.4m and flagged `thin` exactly as the
@@ -91,8 +107,8 @@ def build() -> tuple[str, str]:
     legend: list[str] = []
 
     # Wide enough for the longest row, deep enough for all six.
-    width = (max(len(GROUNDS), len(BUILDINGS), len(STEPS)) + 1) * (PLOT + GAP) + PLOT
-    depth = BUILDING_Y + 5 * (PLOT + ROW_GAP) + 40.0
+    width = (max(len(GROUNDS), len(BUILDINGS), len(HISTORIC), len(STEPS)) + 1) * (PLOT + GAP) + PLOT
+    depth = BUILDING_Y + 12 * (PLOT + ROW_GAP) + 100.0
     sky = int(400.0 * M)  # clears the 310m specimen with room to spare
 
     # A bare-earth base under everything, so the gaps between plots read as
@@ -108,7 +124,7 @@ def build() -> tuple[str, str]:
         )
     )
 
-    legend.append("GROUND FLATS — south row, west to east:")
+    legend.append("ROW 1 — GROUND FLATS (behind spawn), west to east:")
     for index, name in enumerate(GROUNDS):
         x = GAP + index * (PLOT + GAP)
         specs.append(
@@ -124,7 +140,7 @@ def build() -> tuple[str, str]:
         legend.append(f"  {index + 1:2d}. {name}")
 
     legend.append("")
-    legend.append("BUILDINGS — north row, west to east:")
+    legend.append("ROW 2 — BUILDINGS (you face these), west to east:")
     for index, (label, tags, height_m, footprint_m2) in enumerate(BUILDINGS):
         x = GAP + index * (PLOT + GAP)
         wall, scale_y = textures.building_facade(tags, index, height_m, footprint_m2)
@@ -143,10 +159,32 @@ def build() -> tuple[str, str]:
         )
         legend.append(f"  {index + 1:2d}. {label}  [{wall}, {height_m:g}m]")
 
-    # --- row 3: barriers, extruded thin ------------------------------------
-    barrier_y = BUILDING_Y + PLOT + ROW_GAP
+    # --- row 2b: historic and civic ----------------------------------------
+    historic_y = BUILDING_Y + PLOT + ROW_GAP
     legend.append("")
-    legend.append("BARRIERS — third row, west to east:")
+    legend.append("ROW 3 — HISTORIC / CIVIC, west to east:")
+    for index, (label, tags, height_m, footprint_m2) in enumerate(HISTORIC):
+        x = GAP + index * (PLOT + GAP)
+        wall, scale_y = textures.building_facade(tags, index + 40, height_m, footprint_m2)
+        specs.append(
+            SectorSpec(
+                polygon=box(
+                    x * M, historic_y * M, (x + PLOT) * M, (historic_y + PLOT) * M
+                ),
+                floor=round(height_m * M),
+                ceiling=sky,
+                floor_tex=textures.ROOF,
+                wall_tex=wall,
+                wall_scale_y=scale_y,
+                light=216,
+            )
+        )
+        legend.append(f"  {index + 1:2d}. {label}  [{wall}, {height_m:g}m]")
+
+    # --- row 3: barriers, extruded thin ------------------------------------
+    barrier_y = historic_y + PLOT + ROW_GAP
+    legend.append("")
+    legend.append("ROW 4 — BARRIERS, west to east:")
     for index, (label, tags, height_m) in enumerate(BARRIERS):
         x = GAP + index * (PLOT + GAP)
         specs.append(
@@ -167,7 +205,7 @@ def build() -> tuple[str, str]:
     # --- row 4: terrain steps, walkable and not ----------------------------
     step_y = barrier_y + PLOT
     legend.append("")
-    legend.append("TERRAIN STEPS — fourth row, west to east (climb limit 0.75m):")
+    legend.append("ROW 5 — TERRAIN STEPS, west to east (climb limit 0.75m):")
     for index, height_m in enumerate(STEPS):
         x = GAP + index * (PLOT + GAP)
         specs.append(
@@ -186,7 +224,7 @@ def build() -> tuple[str, str]:
     # --- row 5: water, sea and ballast, since these carry their own depths --
     water_y = step_y + PLOT + ROW_GAP
     legend.append("")
-    legend.append("SURFACES WITH DEPTH — fifth row, west to east:")
+    legend.append("ROW 6 — SURFACES WITH DEPTH, west to east:")
     for index, (label, flat, drop_m) in enumerate(
         [
             ("water (2m below grade)", textures.WATER, -2.0),
@@ -220,7 +258,7 @@ def build() -> tuple[str, str]:
     # understand, and the next person should be able to see it in ten seconds.
     bridge_y = water_y + PLOT + ROW_GAP
     legend.append("")
-    legend.append("BRIDGE (known limitation) — sixth row:")
+    legend.append("ROW 7 — BRIDGE (known limitation):")
     specs.append(
         SectorSpec(
             polygon=box(GAP * M, bridge_y * M, (GAP + 60) * M, (bridge_y + 8) * M),
@@ -247,16 +285,88 @@ def build() -> tuple[str, str]:
     legend.append("      rather than passing over it. Doom sectors have one")
     legend.append("      floor height per point; this needs GZDoom 3D floors.")
 
-    # --- trees, along the base row -----------------------------------------
+    # --- row 7: roads at their real widths, with kerbs ---------------------
+    #
+    # Laid as running strips rather than square plots, because a carriageway is
+    # a thing you judge by walking down it: the kerb reveal, how a pavement sits
+    # against it, and whether the width feels like the road it claims to be.
+    road_y = bridge_y + 24.0
     legend.append("")
-    legend.append("TREES — in front of the ground flats, west to east:")
+    legend.append("ROW 8 — ROADS at real widths, running east-west:")
+    for index, (label, flat, width_m, drop_m) in enumerate(
+        [
+            ("motorway 22m", textures.ROAD, 22.0, -0.25),
+            ("primary 10m", textures.ROAD, 10.0, -0.25),
+            ("residential 6m", textures.ROAD, 6.0, -0.25),
+            ("pavement 2m", textures.PAVEMENT, 2.0, 0.0),
+            ("footway 1.5m", textures.PAVEMENT, 1.5, 0.0),
+            ("railway 9m (ballast)", textures.BALLAST, 9.0, -0.25),
+        ]
+    ):
+        y = road_y + index * 6.0
+        specs.append(
+            SectorSpec(
+                polygon=box(GAP * M, y * M, (GAP + 90) * M, (y + width_m) * M),
+                floor=round(drop_m * M),
+                ceiling=sky,
+                floor_tex=flat,
+                wall_tex=textures.KERB,
+                light=200,
+            )
+        )
+        legend.append(f"  {index + 1:2d}. {label}")
+
+    # --- row 8: sloped ground, which is how all real terrain renders --------
+    #
+    # Everything above is a flat sector, and almost nothing in a real tile is:
+    # ground is cut into triangles carrying per-vertex heights, and the whole
+    # continuity mechanism is that adjacent triangles share two corners so their
+    # planes agree exactly along the shared edge. A specimen board of flat
+    # squares would therefore miss the surface the player actually walks on.
+    slope_y = road_y + 6 * 6.0 + ROW_GAP
+    legend.append("")
+    legend.append("ROW 9 — SLOPED GROUND, west to east (gradient):")
+    for index, (label, rise_m) in enumerate(
+        [("1 in 20 (gentle)", 1.5), ("1 in 8 (a hill)", 3.75),
+         ("1 in 4 (steep bank)", 7.5), ("1 in 2 (very steep)", 15.0)]
+    ):
+        x = GAP + index * (PLOT + GAP)
+        run = PLOT * M
+
+        def ramp(px, py, x0=x * M, rise=rise_m * M, run=run):
+            # Linear in x across the plot, which gives a plane the fitter can
+            # reproduce exactly — so any stepping seen here is a real defect.
+            return rise * max(0.0, min(1.0, (px - x0) / run))
+
+        specs.append(
+            SectorSpec(
+                polygon=box(x * M, slope_y * M, (x + PLOT) * M, (slope_y + PLOT) * M),
+                floor=0,
+                ceiling=sky,
+                floor_tex=textures.GRASS,
+                wall_tex=textures.TERRAIN_SIDE,
+                light=208,
+                sloped=True,
+                height_at=ramp,
+            )
+        )
+        legend.append(f"  {index + 1:2d}. {label} — rises {rise_m:g}m over {PLOT:g}m")
+
+    # --- trees, in their own row -------------------------------------------
+    #
+    # These were first placed along the far south edge, behind a spawn that
+    # faces north — so the answer to "are there trees?" was "yes, and you will
+    # never see them". A specimen only counts if it is in the walk.
+    tree_y = slope_y + PLOT + ROW_GAP
+    legend.append("")
+    legend.append("ROW 10 — TREES, west to east (one actor, scaled):")
     things: list[Thing] = []
     for index, height_m in enumerate(TREE_HEIGHTS):
         x = GAP + index * (PLOT + GAP) + PLOT / 2
         things.append(
             Thing(
                 x=round(x * M),
-                y=round(2.0 * M),
+                y=round(tree_y * M),
                 type=art.TREE_DOOMEDNUM,
                 # The same scaling `vegetation` uses, so what stands here is
                 # what stands on a real tile.
