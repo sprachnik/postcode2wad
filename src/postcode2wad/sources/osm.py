@@ -29,7 +29,27 @@ SOURCES = ("auto", "local", "overpass")
 
 def find_extract(explicit: str | Path | None = None) -> Path | None:
     """The extract to use: the one named, the one in the environment, or the
-    only one sitting in `data/`."""
+    widest one sitting in `data/`.
+
+    Widest, not first. This used to take `sorted(glob(...))[0]`, which is
+    alphabetical — with both `england-latest.osm.pbf` and `kent-latest.osm.pbf`
+    present it picked England because "e" precedes "k". That was the right file
+    for the wrong reason, and the reason would have reversed the day someone
+    added `cornwall-latest`.
+
+    Choosing wrong here is invisible. A too-small extract still `covers()` the
+    query, still returns features, and still builds a map — it just has nothing
+    outside its own boundary. Measured on Sevenoaks' western edge (5 Aug), the
+    Kent extract gave 2 buildings and 22 roads where England and Overpass both
+    gave 7 and 40; the interior control was identical across all three. So the
+    failure mode is a tile that is quietly two thirds empty along a county
+    border, with no error anywhere.
+
+    File size is a proxy for coverage, and a good one among Geofabrik extracts:
+    they are the same format at the same density, so bigger means more ground.
+    It is only consulted when nothing explicit was asked for, and the choice is
+    reported by the caller.
+    """
     if explicit:
         path = Path(explicit)
         return path if path.exists() else None
@@ -37,8 +57,8 @@ def find_extract(explicit: str | Path | None = None) -> Path | None:
     if from_env:
         path = Path(from_env)
         return path if path.exists() else None
-    found = sorted(EXTRACT_DIR.glob("*.osm.pbf"))
-    return found[0] if found else None
+    found = sorted(EXTRACT_DIR.glob("*.osm.pbf"), key=lambda p: p.stat().st_size)
+    return found[-1] if found else None
 
 
 def choose(
@@ -78,9 +98,16 @@ def choose(
 
 
 def describe(source: str, path: Path | None) -> str:
-    if source == "local":
-        return f"osm: local extract {path}"
-    return "osm: Overpass API"
+    if source != "local":
+        return "osm: Overpass API"
+    # Name the losers too when there was a choice. Which extract was used
+    # decides whether a border tile is complete or two thirds empty, and the
+    # difference is invisible in the output, so it belongs in the build's notes
+    # rather than only in this module's logic.
+    others = [p.name for p in EXTRACT_DIR.glob("*.osm.pbf") if path and p.name != path.name]
+    if others:
+        return f"osm: local extract {path} (widest of {len(others) + 1}; also saw {', '.join(sorted(others))})"
+    return f"osm: local extract {path}"
 
 
 def fetch_tile(
