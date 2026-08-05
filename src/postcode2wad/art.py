@@ -208,6 +208,15 @@ GROUNDS = (
     Ground("DMCONC", (158, 156, 150), blotch=0.06, grain=0.04, cells=3),
     Ground("DMGRAVEL", (132, 124, 110), blotch=0.10, grain=0.16, cells=8),
     Ground("DMWATER", (58, 92, 112), blotch=0.10, grain=0.03, cells=3),
+    # Chalk. Kent is chalk downland that ends in a cliff, and every contour
+    # riser was being painted DMGRASS — so a 10m sea cliff rendered as a grass
+    # wall. Near-white with very little blotch, because a fresh chalk face is
+    # the most uniform surface in the county; the grain carries the flint
+    # banding without turning it grey.
+    Ground("DMCHALK", (222, 220, 210), blotch=0.05, grain=0.07, cells=4),
+    # Marsh. North Kent and Romney are marsh, and natural=wetland was falling
+    # through to bare terrain. Between meadow and water: wet, dark, unmown.
+    Ground("DMMARSH", (86, 100, 70), blotch=0.20, grain=0.10, cells=4),
 )
 
 GROUND_BY_NAME = {ground.name: ground for ground in GROUNDS}

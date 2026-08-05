@@ -33,6 +33,8 @@ PAVEMENT = "DMPAVE"  # slabs
 CONCRETE = "DMCONC"
 GRAVEL = "DMGRAVEL"
 WATER = "DMWATER"
+CHALK = "DMCHALK"
+MARSH = "DMMARSH"
 #: Seen from above, a clipped hedge is just dense foliage.
 HEDGE_TOP = WOODLAND
 
@@ -249,6 +251,33 @@ LAND_COVER = {
     "beach": SAND,
     "shingle": GRAVEL,
     "bare_rock": GRAVEL,
+    # Added 5 Aug after auditing which tags actually fall through. Sampled 36
+    # tiles across Thanet and Sevenoaks: 639 parcels recognised, 34 not. These
+    # are every miss that occurred more than once, plus the ones that are
+    # plainly wrong when they do occur.
+    #
+    # swimming_pool was the single most common miss (20 of the 34) and it is
+    # *water* — every pool in both districts was rendering as bare terrain,
+    # which is to say as the field around it.
+    "swimming_pool": WATER,
+    "swimming_area": WATER,
+    "wetland": MARSH,
+    "marsh": MARSH,
+    "dune": SAND,
+    "cliff": CHALK,  # in Kent it is chalk; elsewhere it at least reads as rock
+    "scree": GRAVEL,
+    "horse_riding": MEADOW,
+    "schoolyard": CONCRETE,
+    "outdoor_seating": CONCRETE,
+    "dog_park": GRASS,
+    "resort": GARDEN,
+    "religious": GARDEN,  # churchyards, which are mown and walled like gardens
+    "plant_nursery": FARMLAND,
+    "greenhouse_horticulture": FARMLAND,
+    "aquaculture": WATER,
+    "basin": WATER,
+    "reservoir": WATER,
+    "salt_pond": WATER,
 }
 
 

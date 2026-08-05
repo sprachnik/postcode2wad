@@ -225,9 +225,29 @@ const MAX_PPM = 1.2;      // ~0.8 m/px
 // was 200 grey blocks. A pixel threshold tuned against one viewport height
 // silently becomes a different threshold on every other screen; a count budget
 // does not.
-const TILE_PX_FOR_IMAGE = 8;
-const MAX_IMAGE_TILES = 1400;
-const IMAGE_CACHE_MAX = 512;    // decoded minimaps held at once
+const TILE_PX_FOR_IMAGE = 3.2;
+// MAX_IMAGE_TILES must stay BELOW IMAGE_CACHE_MAX, or the map thrashes: the
+// draw budget lets N tiles ask for images while the cache keeps fewer, so every
+// render evicts tiles it is about to need again and they flicker in and out
+// while panning. It shipped the wrong way round (1400 against 512) and Thanet
+// alone never showed it — 200 tiles fits either number. Sevenoaks is 672 and
+// the two districts together are 872, which is where it would have appeared.
+//
+// The ceiling on both is memory: a 256x256 minimap decodes to ~262 KB, so 900
+// cached is ~236 MB in the worst case. That is the real constraint, and it is
+// why the answer to "more districts" is a lower draw budget rather than a
+// bigger cache. Above the budget the map draws coverage blocks, which is what
+// you want at country scale anyway.
+// With DECODE_PX bounding memory, the binding constraint becomes *transfer*:
+// one fetch per visible tile at ~4.8 KB. 6,000 tiles is ~29 MB, which is a
+// heavy landing page but streams in progressively and is survivable. Beyond
+// that it is not — the whole of England at 800m is 203,000 tiles and ~1 GB of
+// minimaps, which no amount of tuning here fixes. That needs a build-time
+// overview mosaic (a few composited images for zoomed-out views, per-tile
+// minimaps only once you are close enough for the count to be small). See the
+// note in TODO.md; this constant is sized for Kent, not for the country.
+const MAX_IMAGE_TILES = 6000;
+const IMAGE_CACHE_MAX = 6200;   // decoded minimaps held at once, ~100 MB at 64px
 const LOADS_PER_FRAME = 12;     // new image requests started per render
 
 const cam = { e: 0, n: 0, ppm: 0.05 };
@@ -271,20 +291,37 @@ async function loadDistrict(d) {
 const images = new Map();
 let inFlight = 0;
 
+//: Minimaps are decoded down to this square rather than at their native 256,
+//: which is what stops memory being the thing that limits how much of the
+//: country can be on screen. A 256px decode is ~262 KB; at 64 it is ~16 KB, so
+//: the same budget holds 16x more tiles. Measured across the built districts:
+//:
+//:                    tiles   transfer   decoded @256   @64
+//:   two districts      872       4 MB        229 MB    14 MB
+//:   Kent             5,843      29 MB      1,532 MB    96 MB
+//:
+//: At the zoom where the whole of a district is in view a tile is under 10px,
+//: so 64 is already six times more than is drawn. It costs sharpness only when
+//: zoomed in past 64px per tile, where few tiles are visible anyway.
+const DECODE_PX = 64;
+
 function tileImage(slug, id, wanted) {
   const key = slug + '/' + id;
   let rec = images.get(key);
-  if (rec) { rec.used = frame; return rec.img; }
+  if (rec) { rec.used = frame; return rec.bmp; }
   if (!wanted || inFlight >= LOADS_PER_FRAME) return null;
-  const img = new Image();
-  rec = { img, used: frame, ok: false };
+  rec = { bmp: null, used: frame, ok: false };
   images.set(key, rec);
   inFlight++;
-  img.onload = () => { rec.ok = true; inFlight--; render(); };
-  // A missing minimap must not retry forever: the record stays in the cache as
-  // a permanent negative so the block colour is used from then on.
-  img.onerror = () => { inFlight--; };
-  img.src = slug + '/minimaps/' + id + '.png';
+  fetch(slug + '/minimaps/' + id + '.png')
+    .then(r => (r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status))))
+    .then(b => createImageBitmap(b, {
+      resizeWidth: DECODE_PX, resizeHeight: DECODE_PX, resizeQuality: 'high',
+    }))
+    .then(bmp => { rec.bmp = bmp; rec.ok = true; inFlight--; render(); })
+    // A missing minimap must not retry forever: the record stays in the cache
+    // as a permanent negative so the block colour is used from then on.
+    .catch(() => { inFlight--; });
   return null;
 }
 
@@ -292,6 +329,11 @@ function evictImages() {
   if (images.size <= IMAGE_CACHE_MAX) return;
   const byAge = [...images.entries()].sort((a, b) => a[1].used - b[1].used);
   for (let i = 0; i < byAge.length - IMAGE_CACHE_MAX; i++) {
+    // close() releases the decoded bitmap immediately rather than waiting for
+    // GC. With hundreds of them in flight that is the difference between a
+    // bounded footprint and one that only *tends* towards bounded.
+    const rec = images.get(byAge[i][0]);
+    if (rec && rec.bmp) rec.bmp.close();
     images.delete(byAge[i][0]);
   }
 }
