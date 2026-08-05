@@ -156,6 +156,10 @@ def build_one_tile(tile: Tile, options: dict, cache_dir: Path, artifact: Path) -
         "linedefs": built.stats.linedefs,
         "buildings": built.stats.buildings,
         "trees": built.stats.trees,
+        # Percentage of the tile by land cover, measured on the arrangement.
+        # "terrain" means no OSM cover was recognised there, which on a rural
+        # tile is most of it — a fact about the survey, not about the ground.
+        "cover_pct": built.stats.cover_pct,
         "lidar_local": lidar.TALLY.local,
         "lidar_wcs": lidar.TALLY.wcs,
         "seconds": round(time.perf_counter() - started, 2),

@@ -133,6 +133,11 @@ def build_tile_pk3(artifact: Path, out: Path) -> dict | None:
         "sectors": meta.get("sectors", 0),
         "buildings": meta.get("buildings", 0),
         "trees": meta.get("trees", 0),
+        # Trimmed on the way into the manifest, which every visitor downloads
+        # before they play anything: a full breakdown is eight keys per tile and
+        # most of them round to nothing. Anything at or below 0.5% is dropped —
+        # it would display as "0%" anyway.
+        "cover": {k: v for k, v in meta.get("cover_pct", {}).items() if v > 0.5},
     }
 
 
@@ -293,8 +298,30 @@ def main(argv: list[str] | None = None) -> int:
     dj_path = out / "districts.json"
     listing = json.loads(dj_path.read_text()) if dj_path.exists() else {"districts": []}
     listing["districts"] = [d for d in listing["districts"] if d["slug"] != slug]
-    listing["districts"].append({"slug": slug, "name": district, "tiles": len(rows)})
+    listing["districts"].append(
+        {
+            "slug": slug,
+            "name": district,
+            "tiles": len(rows),
+            "area_km2": round(len(rows) * manifest["size_m"] ** 2 / 1e6, 2),
+        }
+    )
     listing["districts"].sort(key=lambda d: d["name"])
+
+    # The headline: how much ground has actually been built, everywhere, so far.
+    #
+    # Computed here and never written by hand, because the moment it is a number
+    # in a README it starts drifting from what shipped -- and a size claim that
+    # is quietly wrong is worse than none.
+    #
+    # It counts *generated map*: tiles built, times tile area. That is
+    # deliberately not the same as the area of the districts covered, and the
+    # two must not be confused. A district's tiles are the grid squares that
+    # intersect its ONS polygon, so they overhang its edges: Thanet is a 103 km²
+    # district and its 200 tiles are 128 km² of map. The playable world is the
+    # bigger number; the place it depicts is the smaller one. Say which you mean.
+    listing["total_km2"] = round(sum(d["area_km2"] for d in listing["districts"]), 2)
+    listing["tiles_total"] = sum(d["tiles"] for d in listing["districts"])
     dj_path.write_text(json.dumps(listing, indent=1), encoding="utf-8")
 
     # `--engine-dir site/engine` is the obvious thing to type on a rebuild --
@@ -322,6 +349,16 @@ def main(argv: list[str] | None = None) -> int:
         f"iwad {(out / 'engine' / IWAD).stat().st_size / 1e6:.0f} MB, "
         f"{len(listing['districts'])} district(s): "
         + ", ".join(d["name"] for d in listing["districts"])
+    )
+    # Printed on every build so the headline figure is stated by the thing that
+    # produced it, and a release note can quote a number that was measured
+    # rather than remembered.
+    breakdown = ", ".join(
+        "{} {:,.2f}".format(d["name"], d["area_km2"]) for d in listing["districts"]
+    )
+    print(
+        f"\nWORLD SO FAR: {listing['total_km2']:,.2f} km² of generated map "
+        f"across {listing['tiles_total']:,} tiles ({breakdown})"
     )
     if not args.no_precompress:
         _suffix, encoding, made = precompress([out / "engine" / f for f in PRECOMPRESS])

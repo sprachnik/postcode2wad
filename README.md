@@ -71,12 +71,21 @@ A whole local authority district goes in one PK3, built in parallel:
 python scripts/build-district.py --district Thanet --size 800 --workers 8 --out out/thanet.pk3
 ```
 
-Thanet is **200 tiles at 800m — 103 km² of Kent coast, 1.47M sectors, 111 MB —
-in 28.5 minutes** on 8 workers, with no failures. Tiles come from the ONS district
+Thanet is **200 tiles at 800m — 128 km² of generated map, 1.47M sectors, 112 MB —
+in 28.5 minutes cold** on 8 workers, with no failures; 5.2 minutes to rebuild with the
+LIDAR cache warm. Tiles come from the ONS district
 polygon rather than a bounding box, one subprocess builds each one, and every finished
 tile is a resumable artifact on disk, so a run measured in hours cannot lose everything
 to a single bad tile. Packs of more than 99 maps are named `M0001`.. rather than
 `MAP01`, which lifts the ceiling to 9,999.
+
+Two areas get quoted about a district and they are not the same number, so this file
+says which it means. **128 km² is the generated map** — 200 tiles of 0.64 km² — and it
+is the size of the playable world. Thanet as a place is **103 km²**; the tiles are the
+grid squares intersecting its ONS polygon, so they overhang its edges. The running
+total across every built district is computed by `build-webdemo.py`, printed at the end
+of every build, and carried in `districts.json` for the site to display — never typed
+into a document, where it would start drifting from what shipped.
 
 **And all of it is playable in a browser: [doomearth.clawhangout.com](https://doomearth.clawhangout.com).**
 Type a postcode to land on the square that covers it, or pick any of Thanet's 200 tiles

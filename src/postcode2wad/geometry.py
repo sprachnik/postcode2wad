@@ -52,6 +52,13 @@ class SectorSpec:
     ceil_tex: str = SKY_FLAT
     wall_tex: str = "BRICK7"
     light: int = 192
+    #: What this region *is*, for measuring land cover. Carried separately from
+    #: `floor_tex` because the texture cannot answer it: unclassified terrain is
+    #: painted DMGRASS, and so is mapped grassland, so counting flats would score
+    #: every unsurveyed field as parkland and inflate greenspace with ground we
+    #: simply know nothing about. "terrain" is the honest default -- it means no
+    #: land cover was recognised here, not that the ground is green.
+    cover: str = "terrain"
     #: Texture repeats per default tiling. A Doom texture is mapped one pixel to
     #: one map unit, so a 128px brick texture spans 4m of wall — which makes each
     #: visible brick course roughly 40cm tall. Scaling up shrinks the texture and
@@ -116,6 +123,14 @@ class MapGeometry:
     #: The arrangement face behind each sector, parallel to `sectors`. Not part
     #: of the UDMF output — kept for the top-down preview renderer.
     faces: list[Polygon] = field(default_factory=list)
+    #: Ground area in square map units per `SectorSpec.cover`, measured on the
+    #: *arrangement*, which is the only place it can honestly be measured. The
+    #: input specs overlap — a road is laid over a field, a building over a
+    #: garden — so summing their polygons would count the same ground several
+    #: times and total well over the tile. Arrangement faces are disjoint by
+    #: construction, so these sum to the tile and every square metre is
+    #: attributed exactly once, to whatever ended up on top.
+    cover_area: dict[str, float] = field(default_factory=dict)
     #: Per-vertex floor height, by vertex index. Only vertices belonging to a
     #: sloped triangle appear here; everything else is flat and takes its
     #: sector's `heightfloor`.
@@ -239,6 +254,13 @@ def build_geometry(
     face_floor: list[int] = []
     for index, (face, _owner) in enumerate(owned):
         spec = face_spec[index]
+        # face_spec, never owned[index][1] — `_absorb_slivers` may have handed
+        # this face to a different spec, and the whole point of measuring here
+        # rather than on the inputs is to count what actually ended up on the
+        # ground. Reading the original owner once put 128 water and building
+        # faces on terrain planes; it would put their area in the wrong column
+        # just as quietly.
+        geo.cover_area[spec.cover] = geo.cover_area.get(spec.cover, 0.0) + face.area
         plane = face_plane[index]
         if plane is not None:
             # Sit the sector's nominal height on its own plane, so the riser

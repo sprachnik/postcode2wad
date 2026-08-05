@@ -15,6 +15,9 @@
   h1 small{display:block;color:var(--dim);font-size:11px;letter-spacing:1px;
            margin-top:6px;font-weight:400}
   .intro{color:var(--dim);max-width:660px;line-height:1.6;font-size:12px}
+  .headline{margin:14px 0 6px;color:var(--dim);font-size:12px}
+  .headline b{color:var(--accent);font-size:22px;font-weight:400;
+              letter-spacing:1px;vertical-align:-1px}
   .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
   .wip div{background:#1c1710;border:1px solid #4a3a1c;color:#d8c89a;
            padding:9px 12px;font-size:11px;line-height:1.6}
@@ -63,8 +66,12 @@
   #tip{position:fixed;pointer-events:none;background:var(--panel);
        border:1px solid var(--border);padding:8px 10px;z-index:10;
        display:none;line-height:1.5;font-size:11px}
+  #tip{min-width:190px}
   #tip .t{color:var(--text)}
   #tip .d{color:var(--dim)}
+  #tip .bar{display:flex;height:7px;margin:6px 0 5px;overflow:hidden;
+            background:var(--sea)}
+  #tip .bar i{display:block;height:100%}
   #maphint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
            z-index:2;color:var(--dim);font-size:12px;text-align:center;
            pointer-events:none;line-height:1.8}
@@ -79,6 +86,8 @@
 <body>
 <header>
   <h1>REAL BRITAIN, AS DOOM LEVELS<small id="sub">postcode2wad</small></h1>
+  <p class="headline"><b id="area">&mdash;</b> of Britain rebuilt as playable
+  Doom, <span id="areatiles"></span> so far.</p>
   <p class="intro">Every square on the map is 800&nbsp;m of real England,
   generated from Environment&nbsp;Agency 1&nbsp;m LIDAR and OpenStreetMap: real
   building footprints at measured heights, sloped terrain, hedges, trees. Drag
@@ -453,6 +462,43 @@ function tileAt(x, y) {
 const playHref = (d, t) =>
   'play.html?d=' + encodeURIComponent(d.slug) + '&tile=' + encodeURIComponent(t.id);
 
+// What a tile is made of, as a stacked bar plus the leaders in words.
+//
+// `terrain` is listed like any other cover and named "unmapped", because that
+// is what it is: ground where OSM had nothing to say. On a rural tile it is the
+// large majority — Chislet measures 86% — and quietly folding it into
+// greenspace would turn a statement about survey coverage into a claim about
+// the landscape. The colours are the map's own palette so the bar reads against
+// the minimap beside it.
+const COVER_STYLE = {
+  grass:    ['#4a6b3a', 'grass'],
+  wood:     ['#2f4a2a', 'woodland'],
+  farm:     ['#6b5433', 'farmland'],
+  building: ['#8a5a4a', 'buildings'],
+  road:     ['#4a4a52', 'roads'],
+  paved:    ['#5a5a62', 'paved'],
+  sea:      ['#1f3a5a', 'sea'],
+  water:    ['#2a5070', 'water'],
+  beach:    ['#8a7a55', 'beach'],
+  barrier:  ['#3a5a3a', 'hedges'],
+  terrain:  ['#3a3a42', 'unmapped'],
+};
+
+function coverBar(cover) {
+  if (!cover) return '';
+  const parts = Object.entries(cover).sort((a, b) => b[1] - a[1]);
+  if (!parts.length) return '';
+  const bar = parts.map(([k, v]) => {
+    const [colour] = COVER_STYLE[k] || ['#3a3a42', k];
+    return '<i style="width:' + v.toFixed(1) + '%;background:' + colour + '"></i>';
+  }).join('');
+  const words = parts.slice(0, 3).map(([k, v]) => {
+    const label = (COVER_STYLE[k] || [null, k])[1];
+    return Math.round(v) + '% ' + label;
+  }).join(' &middot; ');
+  return '<div class="bar">' + bar + '</div><div class="d">' + words + '</div>';
+}
+
 let drag = null;
 let moved = 0;
 
@@ -488,6 +534,7 @@ canvas.addEventListener('pointermove', ev => {
     tip.style.left = Math.min(ev.clientX + 14, innerWidth - 200) + 'px';
     tip.style.top = (ev.clientY + 14) + 'px';
     tip.innerHTML = '<div class="t">' + hit.tile.title + '</div>'
+      + coverBar(hit.tile.cover)
       + '<div class="d">' + hit.tile.buildings + ' buildings &middot; '
       + hit.tile.trees + ' trees &middot; '
       + ((hit.tile.bytes + m.common_bytes) / 1e6).toFixed(1) + ' MB</div>';
@@ -655,6 +702,25 @@ fetch('districts.json').then(r => r.json()).then(async listing => {
   const total = districts.reduce((n, d) => n + d.byPos.size, 0);
   sub.textContent = districts.map(d => d.name).join(', ')
     + ' — ' + total + ' playable square' + (total === 1 ? '' : 's');
+
+  // The headline area comes from districts.json, which build-webdemo.py
+  // computes — never from a number typed into this page, which would start
+  // drifting from what shipped the first time a district was added.
+  //
+  // It is *generated map*: tiles built times tile area. Not the area of the
+  // districts covered, which is smaller, because a district's tiles are the
+  // grid squares intersecting its boundary and so overhang it. The wording
+  // says "rebuilt as playable Doom" rather than naming a place, because the
+  // honest claim is about how much map exists, not how much of Kent it is.
+  if (listing.total_km2) {
+    document.getElementById('area').textContent =
+      listing.total_km2.toLocaleString(undefined, { maximumFractionDigits: 0 })
+      + ' km²';
+    document.getElementById('areatiles').textContent =
+      'across ' + listing.tiles_total.toLocaleString() + ' tiles in '
+      + listing.districts.length
+      + ' district' + (listing.districts.length === 1 ? '' : 's');
+  }
 
   // One button per district that flies to it. With everything on one national
   // grid these are viewport bookmarks, not separate maps — which is the point:

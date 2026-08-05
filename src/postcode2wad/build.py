@@ -140,6 +140,15 @@ class BuildStats:
     sectors: int = 0
     linedefs: int = 0
     elevation_range_m: tuple[float, float] = (0.0, 0.0)
+    #: Percentage of the tile's ground by land cover, keyed by
+    #: `SectorSpec.cover`. Measured on the arrangement, so the parts are
+    #: disjoint and sum to ~100 -- see `MapGeometry.cover_area`.
+    #:
+    #: "terrain" is not a landscape. It is ground where OSM had nothing to say,
+    #: and on a rural tile it is usually the largest share. Reporting it as its
+    #: own category rather than folding it into greenspace is the difference
+    #: between measuring the map and measuring OpenStreetMap's coverage of it.
+    cover_pct: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -484,6 +493,7 @@ def build_tile(
                         floor=round(elevation_m * UNITS_PER_METRE),
                         ceiling=sky_height,
                         floor_tex=flat,
+                        cover=textures.COVER_BY_FLAT.get(flat, "terrain"),
                         # Risers inside a parcel wear the parcel's own cover, so
                         # a contour step in a ploughed field is ploughed too.
                         wall_tex=flat,
@@ -502,6 +512,7 @@ def build_tile(
                     floor=round(SEA_LEVEL_M * UNITS_PER_METRE) + SEA_SURFACE_UNITS,
                     ceiling=sky_height,
                     floor_tex=textures.WATER,
+                    cover="sea",
                     wall_tex=textures.BANK,
                     light=WATER_LIGHT,
                 )
@@ -522,6 +533,7 @@ def build_tile(
                         floor=round(elevation_m * UNITS_PER_METRE),
                         ceiling=sky_height,
                         floor_tex=textures.SAND,
+                        cover="beach",
                         wall_tex=textures.SAND,
                         light=DAYLIGHT,
                         sloped=with_slopes,
@@ -537,6 +549,7 @@ def build_tile(
                     floor=level - WATER_DEPTH_UNITS,
                     ceiling=sky_height,
                     floor_tex=textures.WATER,
+                    cover="water",
                     wall_tex=textures.BANK,
                     light=WATER_LIGHT,
                 )
@@ -578,6 +591,7 @@ def build_tile(
                         floor=floor if paved else floor - KERB_UNITS,
                         ceiling=sky_height,
                         floor_tex=textures.PAVEMENT if paved else textures.ROAD,
+                        cover="road",
                         wall_tex=textures.KERB,
                         light=ROAD_LIGHT,
                         sloped=with_slopes,
@@ -622,6 +636,7 @@ def build_tile(
                             floor_tex=textures.HEDGE_TOP
                             if wall == textures.HEDGE
                             else textures.CONCRETE,
+                            cover="barrier",
                             wall_tex=wall,
                             light=DAYLIGHT,
                             thin=True,   # a fence is meant to be this narrow
@@ -648,6 +663,7 @@ def build_tile(
                 floor=round((ground_m + height_m) * UNITS_PER_METRE),
                 ceiling=sky_height,
                 floor_tex=textures.ROOF,
+                cover="building",
                 wall_tex=wall,
                 light=ROOF_LIGHT,
                 wall_scale_y=scale_y,
@@ -699,6 +715,20 @@ def build_tile(
 
     stats.sectors = len(geometry.sectors)
     stats.linedefs = len(geometry.linedefs)
+
+    # Against the arrangement's own total, not the tile square. The two are the
+    # same to within rounding, but dividing by the square would quietly turn any
+    # gap in the arrangement into a shortfall spread across every category,
+    # which reads as "the numbers do not add up" rather than as the meshing bug
+    # it would actually be.
+    total = sum(geometry.cover_area.values())
+    if total > 0:
+        stats.cover_pct = {
+            name: round(area / total * 100, 1)
+            for name, area in sorted(
+                geometry.cover_area.items(), key=lambda kv: -kv[1]
+            )
+        }
 
     title = place.name or place.postcode or place.query
     return BuiltMap(geometry=geometry, tile=tile, place=place, title=title, stats=stats)

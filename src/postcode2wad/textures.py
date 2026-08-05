@@ -59,6 +59,29 @@ TERRAIN_SIDE = GRASS
 #: Water's edge is a genuine cut bank, so it keeps an earth face.
 BANK = "A-MUD"
 
+#: Land-cover category per ground flat, for measuring what a tile is made of.
+#:
+#: Only consulted for surfaces that came from *mapped* land cover. Bare terrain
+#: is painted GRASS too, and it must not be counted as grassland: it means no
+#: cover was recognised there, which is a statement about OSM's coverage rather
+#: than about the ground. `SectorSpec.cover` defaults to "terrain" for exactly
+#: that reason, and only the landuse path looks anything up here.
+COVER_BY_FLAT = {
+    GRASS: "grass",
+    GARDEN: "grass",
+    MEADOW: "grass",
+    PITCH: "grass",
+    WOODLAND: "wood",
+    SCRUB: "wood",
+    FARMLAND: "farm",
+    SAND: "beach",
+    WATER: "water",
+    CONCRETE: "paved",
+    GRAVEL: "paved",
+    ROAD: "road",
+    PAVEMENT: "road",
+}
+
 #: Texture repeats per default tiling, by wall texture name.
 #:
 #: Doom maps one texture pixel to one map unit, so a 128px-tall texture covers
