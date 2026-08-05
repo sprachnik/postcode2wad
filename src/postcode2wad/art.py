@@ -231,7 +231,7 @@ GROUNDS = (
     # 1.8m proud of the grass beside it is correct and must not be counted as a
     # ground-to-ground step, and it used to be excluded only by the accident of
     # barriers being flat sectors.
-    Ground("DMHEDGE", (48, 66, 38), blotch=0.22, grain=0.10, cells=6),
+    Ground("DMHEDGT", (48, 66, 38), blotch=0.22, grain=0.10, cells=6),
     Ground("DMWALLC", (158, 156, 150), blotch=0.06, grain=0.04, cells=3),
 )
 

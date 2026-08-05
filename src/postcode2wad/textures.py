@@ -41,7 +41,7 @@ RAIL_HEAD = "DMRAILH"
 #: Seen from above, a clipped hedge is just dense foliage, and a wall coping is
 #: concrete — but both get their own flat names so a barrier top can be told
 #: apart from ground wearing the same texture. See the note in art.py.
-HEDGE_TOP = "DMHEDGE"
+HEDGE_TOP = "DMHEDGT"
 WALL_CAP = "DMWALLC"
 #: Every flat that means "the top of a barrier", for tests that must not count
 #: one as ground.
