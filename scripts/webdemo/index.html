@@ -193,9 +193,25 @@ const mapHint = document.getElementById('maphint');
 // picking a specific street, not because it adds detail.
 const MIN_PPM = 0.0015;   // ~670 m/px — most of Great Britain in view
 const MAX_PPM = 1.2;      // ~0.8 m/px
-const TILE_PX_FOR_IMAGE = 40;   // below this a tile is a coloured block
+// When to draw minimaps rather than flat blocks. This is a budget, not a
+// preference for a particular tile size, and it is two conditions because
+// either one alone gets it wrong:
+//
+//   TILE_PX_FOR_IMAGE  below a few pixels a 256px minimap is mush and costs a
+//                      fetch to render noise, so blocks are honestly better.
+//   MAX_IMAGE_TILES    the real limit is how many images are on screen at once,
+//                      which is what actually costs memory and bandwidth.
+//
+// It was one condition — tile >= 40px — and that was wrong in the way that
+// matters most: the *default* view. Fitting Thanet to a typical window gives
+// ~35px per tile, just under the cutoff, so the first thing every visitor saw
+// was 200 grey blocks. A pixel threshold tuned against one viewport height
+// silently becomes a different threshold on every other screen; a count budget
+// does not.
+const TILE_PX_FOR_IMAGE = 8;
+const MAX_IMAGE_TILES = 1400;
 const IMAGE_CACHE_MAX = 512;    // decoded minimaps held at once
-const LOADS_PER_FRAME = 6;      // new image requests started per render
+const LOADS_PER_FRAME = 12;     // new image requests started per render
 
 const cam = { e: 0, n: 0, ppm: 0.05 };
 let districts = [];       // [{slug, name, tiles, size_m, byPos, bounds}]
@@ -320,13 +336,30 @@ function render() {
   let drawn = 0;
   inFlight = Math.max(0, inFlight);
 
-  for (const d of districts) {
+  // The visible ix/iy range per district. Computed once and reused, because
+  // both the count pass and the draw pass want exactly the same window — and
+  // this is the whole scaling story: panning over a country never touches a
+  // tile it is not showing.
+  const windows = districts.map(d => ({
+    d,
+    ix0: Math.floor(tl.e / d.size_m), ix1: Math.floor(br.e / d.size_m),
+    iy0: Math.floor(br.n / d.size_m), iy1: Math.floor(tl.n / d.size_m),
+  }));
+
+  // Count first, so the image budget is decided on what is actually on screen
+  // rather than on a proxy for it. O(visible), the same as drawing.
+  let visible = 0;
+  for (const w of windows) {
+    for (let iy = w.iy0; iy <= w.iy1; iy++) {
+      for (let ix = w.ix0; ix <= w.ix1; ix++) {
+        if (w.d.byPos.get(ix + ',' + iy)) visible++;
+      }
+    }
+  }
+
+  for (const { d, ix0, ix1, iy0, iy1 } of windows) {
     const px = d.size_m * cam.ppm;           // one tile, in screen pixels
-    const wantImage = px >= TILE_PX_FOR_IMAGE;
-    // Only the ix/iy actually on screen. This is the whole scaling story:
-    // panning over a country never touches a tile it is not showing.
-    const ix0 = Math.floor(tl.e / d.size_m), ix1 = Math.floor(br.e / d.size_m);
-    const iy0 = Math.floor(br.n / d.size_m), iy1 = Math.floor(tl.n / d.size_m);
+    const wantImage = px >= TILE_PX_FOR_IMAGE && visible <= MAX_IMAGE_TILES;
 
     for (let iy = iy0; iy <= iy1; iy++) {
       for (let ix = ix0; ix <= ix1; ix++) {
