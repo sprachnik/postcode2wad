@@ -119,6 +119,32 @@ DSM = Coverage(
     broken_squares=frozenset({"TR"}),
 )
 
+#: The *first* return surface, and the way out of the TR packaging defect.
+#:
+#: Probed 5 Aug: the bulk publication has real rasters for TR where the
+#: last-return product has none — TR3065 41.9 MB, TR3570 19.6 MB, TR2565
+#: 41.6 MB, all with a .tif, against metadata-only zips for the same three
+#: squares under `lidar_composite_last_return_dsm`. So eastern Kent can be
+#: mirrored with this and does not have to go one WCS round trip per tile.
+#:
+#: It is a different surface, not a different packaging of the same one: first
+#: return is the top of whatever the pulse hit first, so it sits on tree canopy
+#: rather than through it. For building heights (P90 of DSM-DTM inside a
+#: footprint) that is arguably the more correct surface; for the tree finder,
+#: which thresholds DSM-DTM, it reads canopy more aggressively. Do not switch
+#: the default without the A/B — see docs/lidar-bulk.md.
+FIRST_RETURN_DSM = Coverage(
+    label="DSM(first)",
+    wcs_url=(
+        "https://environment.data.gov.uk/spatialdata/"
+        "lidar-composite-digital-surface-model-first-return-dsm-1m/wcs"
+    ),
+    coverage_id="df4e3ec3-315e-48aa-aaaf-b5ae74d7b2bb__Lidar_Composite_Elevation_FZ_DSM_1m",
+    product="lidar_composite_first_return_dsm",
+    year="2022",
+    resolution="1",
+)
+
 #: The GeoTIFF's declared NODATA. Anything at or below this is a hole.
 NODATA_THRESHOLD = -1e30
 

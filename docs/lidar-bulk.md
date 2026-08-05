@@ -319,6 +319,43 @@ the National LIDAR Programme: that would mean mosaicking six survey years.
 For DSM, the current `lidar_composite_last_return_dsm/2022/1` **cannot be bulk-fetched for
 TR**. Three options, in preference order:
 
+> ### Resolved 5 Aug 2026: take option 1
+>
+> The A/B was run. `lidar_composite_first_return_dsm/2022/1` **does** have bulk
+> rasters for TR, where the last-return product has none — probed TR3065
+> (41.9 MB), TR3570 (19.6 MB) and TR2565 (41.6 MB), all with a real `.tif`,
+> against metadata-only zips for the same three squares. So eastern Kent can be
+> mirrored, and does not need one WCS round trip per tile.
+>
+> *(TR2565 first returned a 0.6 MB unreadable zip. That was a truncated
+> download, not a defect — it retried clean at 41.6 MB. `fetch-lidar.py` reports
+> `BAD ZIP` as a terminal outcome, so a 191-tile run will record transient
+> truncations as data defects. Worth a retry there before the bulk fetch.)*
+>
+> **What changes.** Measured on Birchington (`bng800-787-211`), 500 buildings:
+>
+> | | last return | first return | difference |
+> | --- | --- | --- | --- |
+> | building height, mean | 6.36 m | 6.40 m | **+0.034 m** |
+> | building height, median | 6.63 m | 6.66 m | +0.048 m |
+> | uncapped tree count | 3,227 | 3,588 | **+11.2%** |
+> | canopy, % of tile | 22.83 | 25.09 | +2.3 pts |
+>
+> Building heights are unchanged for practical purposes — 3 cm on the mean, and
+> the whole distribution moves less than a tenth of Doom's 24-unit step. 50 of
+> the 500 buildings (10%) differ by more than 0.5 m, worst 5.26 m, which is the
+> expected artefact: first return sits on canopy overhanging a roof rather than
+> passing through it. That is the residual risk and it is directional, so it is
+> worth a look if a specific building ever reads too tall.
+>
+> The canopy difference is real but modest, and mostly invisible here: this tile
+> saturates the 900-tree cap either way. Note the first measurement of it read
+> "900 vs 900" and said nothing at all — that is the cap, not the signal, and it
+> had to be re-measured with the cap lifted.
+>
+> Verdict: ~5 hours of per-tile WCS round trips over a full Kent build, traded
+> for 3 cm of building height and 11% more trees. Take it.
+
 1. **Switch to `lidar_composite_first_return_dsm/2022/1`.** Available for both squares.
    First return is the *upper* surface — for building heights (P90 of DSM−DTM inside a
    footprint) that is arguably more correct than last return anyway, though it will read
