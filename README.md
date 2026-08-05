@@ -1,14 +1,29 @@
 # postcode2wad
 
-Type any UK postcode, get a playable GZDoom level of that real place — generated from
-DEFRA LIDAR terrain and real building footprints.
+Turns UK open geospatial data into playable GZDoom levels. Environment Agency LIDAR
+gives the terrain and building heights, OpenStreetMap gives the footprints, roads and
+land cover, and the output is a PK3 that loads in stock GZDoom.
 
-> "Arnis, but for Doom."
+> **Work in progress.** It builds real, walkable places today, but coverage is limited
+> to areas whose LIDAR has been mirrored locally — currently Thanet, in east Kent. It is
+> not a finished product and the rough edges are documented rather than hidden.
 
 ```
-postcode2wad "CT7 0XX" --size 400 --out birchington.pk3
+postcode2wad "CT1 2EH" --size 400 --out birchington.pk3
 gzdoom -iwad freedoom2.wad -file birchington.pk3 +map MAP01
 ```
+
+A postcode is the usual way in, because it is the handle most people have for a place —
+but it is only a way of naming a coordinate. The project is the pipeline from open data
+to geometry, not the geocoder.
+
+### What "coverage" means
+
+The build needs a 1m LIDAR digital surface model for the ground you ask for. Where that
+has been mirrored locally, a tile builds in seconds; where it has not, it is fetched
+over the network a tile at a time, and where the Environment Agency has no survey at
+all, it cannot be built. **Thanet's 200 tiles are built and browsable**; the rest of Kent
+and beyond is a matter of downloading more LIDAR, not of new code.
 
 ## Status
 
@@ -64,7 +79,8 @@ to a single bad tile. Packs of more than 99 maps are named `M0001`.. rather than
 `MAP01`, which lifts the ceiling to 9,999.
 
 **And all of it is playable in a browser: [doomearth.clawhangout.com](https://doomearth.clawhangout.com).**
-Pick any of Thanet's 200 tiles off a minimap grid, choose a performance mode, spawn on
+Type a postcode to land on the square that covers it, or pick any of Thanet's 200 tiles
+off a minimap grid; choose a performance mode, spawn on
 it, and walk to a tile edge to cross into the neighbour — the launcher reads the HUD's
 telemetry off the engine's console stream, loads the next tile when you push into the
 boundary, and hands your position across so you come out on the same street rather than
@@ -77,9 +93,14 @@ rather than a gun (`?weapon=none` for empty hands). The engine is
 all presented as the same black screen, and the FPS measurement that decided single
 tiles over region packs.
 
-Still to come: street-name signs, and a bulk DSM mirror for eastern Kent — the district
-run above is network-bound, not CPU-bound, because the Environment Agency's bulk 1m DSM
-is missing for the whole TR grid square (see [`docs/lidar-bulk.md`](docs/lidar-bulk.md)).
+A postcode outside the built tiles is told so plainly — it names the district and says
+more regions are coming — rather than failing, because most of the country is not built
+yet and that is the honest state of the project rather than a bug.
+
+Still to come: more districts, street-name signs, and a bulk DSM mirror for eastern
+Kent — the district run above is network-bound, not CPU-bound, because the Environment
+Agency's bulk 1m DSM is missing for the whole TR grid square (see
+[`docs/lidar-bulk.md`](docs/lidar-bulk.md)).
 
 See [`TODO.md`](TODO.md) for the working list — including the known rough edges —
 [`CLAUDE.md`](CLAUDE.md) for how to work on it without repeating old mistakes, and

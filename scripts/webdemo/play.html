@@ -24,8 +24,22 @@
        white-space:pre-wrap;line-height:1.45;z-index:5;display:none}
   #log .e{color:#db4}
   #log .ok{color:#6c6}
+  /* Diagnostic badge. Always visible, never clickable, and carries the build
+     stamp so a screenshot proves which build is being looked at — a stale
+     play.html (5 min browser cache) otherwise looks exactly like a fix that
+     did not work. */
+  #diag{position:fixed;top:10px;right:10px;z-index:7;pointer-events:none;
+        background:rgba(11,11,12,.82);border:1px solid #2a2a30;padding:6px 9px;
+        font-size:11px;line-height:1.5;color:#8a8a92;text-align:right}
+  #diag b{color:#dcdcdc;font-weight:400}
+  #diag .held{color:#6c6}
+  #diag .none{color:#e08a8a}
+  #copylog{position:fixed;right:58px;bottom:10px;z-index:7;background:#1a1a1e;
+           color:#dcdcdc;border:1px solid #2a2a30;padding:4px 8px;cursor:pointer;
+           font:inherit;opacity:.5}
+  #copylog:hover{opacity:1}
   #bar{position:fixed;top:0;left:0;height:3px;width:0;background:#c44;z-index:6;
-       transition:width .12s linear}
+       transition:width .12s linear;pointer-events:none}
   #hide{position:fixed;right:10px;bottom:10px;z-index:7;background:#1a1a1e;
         color:#dcdcdc;border:1px solid #2a2a30;padding:4px 8px;cursor:pointer;
         font:inherit;opacity:.5}
@@ -34,8 +48,16 @@
         text-decoration:none;background:rgba(20,20,24,.6);padding:4px 10px;
         border:1px solid #2a2a30}
   #back:hover{color:#dcdcdc}
+  /* Every non-interactive overlay must pass clicks through to the canvas.
+     #status sits dead centre and is where "click the game to capture the
+     mouse" is printed — without this it is a shield over the one place the
+     player is being told to click, the canvas click handler never fires, no
+     pointer lock is requested, and mouse-look silently falls back to absolute
+     positions that stop dead at the window edge. The instruction was its own
+     obstacle. #bar is decorative and spans the full width at the top. */
   #status{position:fixed;top:45%;left:50%;transform:translate(-50%,-50%);
-          color:#8a8a92;z-index:4;text-align:center;line-height:1.8}
+          color:#8a8a92;z-index:4;text-align:center;line-height:1.8;
+          pointer-events:none}
   #modes{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
          z-index:8;background:#131316;border:1px solid #2a2a30;padding:18px;
          display:none;flex-direction:column;gap:10px;min-width:280px}
@@ -47,12 +69,15 @@
   #modes button b{display:block;font-size:13px;letter-spacing:1px}
   #modes button span{color:#8a8a92;font-size:11px}
   #modes button:hover span{color:#e8b8b8}
+  /* The banner is shown whenever the player is within 25 m of a tile edge,
+     which on an 800 m tile is a lot of the time — so the box itself must not
+     shield the canvas. Only the link inside it is meant to be clickable. */
   #hop{position:fixed;top:22%;left:50%;transform:translateX(-50%);z-index:8;
        display:none;gap:12px;flex-direction:column;align-items:center;
-       text-align:center}
+       text-align:center;pointer-events:none}
   #hop a{background:rgba(11,11,12,.88);border:2px solid #c44;color:#dcdcdc;
          padding:16px 26px;text-decoration:none;font:inherit;font-size:17px;
-         letter-spacing:1px}
+         letter-spacing:1px;pointer-events:auto}
   #hop a:hover{background:#742828;color:#fff}
   #hop b{color:#fff}
   #exited{position:fixed;inset:0;z-index:9;background:rgba(11,11,12,.94);
@@ -102,6 +127,8 @@
 </div>
 <div id="hint"></div>
 <div id="log"></div>
+<div id="diag"></div>
+<button id="copylog">copy log</button>
 <button id="hide">log</button>
 
 <script>
@@ -343,15 +370,173 @@ const TOUCH = matchMedia('(pointer: coarse)').matches && navigator.maxTouchPoint
 // Mirrors the upstream loader, whose comment describes this exact symptom.
 let booted = false;
 const canvasEl = document.getElementById('canvas');
-canvasEl.addEventListener('click', () => {
+
+// `wantLock` is the page's intent, kept apart from the browser's actual state,
+// because the two disagree and that disagreement is the whole bug. The engine
+// has its own opinion: uzdoom.js imports both _emscripten_request_pointerlock
+// and _emscripten_exit_pointerlock (GZDoom's I_CheckNativeMouse driving
+// SDL_SetRelativeMouseMode), so it can drop a lock this page took, on its own
+// schedule, without telling anyone. GZDoom ignores the return value, so when
+// its own request is deferred — emscripten defers whenever there is no
+// transient user activation, and the engine calls from the main loop, never a
+// gesture — it still believes it is capturing and keeps posting deltas derived
+// from the absolute cursor. That is exactly "turning works, with an invisible
+// wall at the window edge".
+let wantLock = false;
+
+function takeLock(why) {
   if (TOUCH || !booted || document.pointerLockElement === canvasEl) return;
-  if (canvasEl.requestPointerLock) canvasEl.requestPointerLock();
+  wantLock = true;
+  lockCount.asked++;
+  // Focus the canvas before asking. GZDoom releases the mouse whenever it
+  // believes the window is not active, and in a wasm build that belief comes
+  // from SDL's focus state — which never becomes true if nothing ever focuses
+  // the canvas. It is tabindex="-1", so only script can.
+  try { canvasEl.focus(); } catch (e) { /* not fatal */ }
+  lockLog('requesting lock (' + why + ')');
+  retries = 0;
+  askOnce(true);
+}
+
+// Esc is the problem this exists for. Esc opens GZDoom's menu *and* releases
+// the lock (browser-enforced, not ours), and Chrome then refuses to grant it
+// again for about 1.25s — "pointer lock cannot be acquired immediately after
+// the user has exited the lock". The player's click to close the menu lands
+// inside that window, gets refused, and mouse-look is dead until they think
+// to click a second time. So a refusal schedules its own retry.
+let retries = 0;
+let retryTimer = 0;
+const MAX_RETRIES = 4;
+
+function askOnce(raw) {
+  let p;
+  try {
+    // unadjustedMovement skips OS pointer acceleration, which is what a game
+    // wants — but it is not universally supported, so an unrecognised-option
+    // rejection has to fall back to a plain request rather than give up.
+    p = raw ? canvasEl.requestPointerLock({ unadjustedMovement: true })
+            : canvasEl.requestPointerLock();
+  } catch (e) {
+    scheduleRetry();
+    return;
+  }
+  // Where it returns a promise, an unhandled rejection is not just noise: it
+  // trips the page's own unhandledrejection reporter. Every path is caught.
+  if (p && p.catch) p.catch(() => { if (raw) askOnce(false); else scheduleRetry(); });
+}
+
+function scheduleRetry() {
+  if (!wantLock || document.pointerLockElement === canvasEl) return;
+  if (retries >= MAX_RETRIES) {
+    lockLog('giving up after ' + retries + ' retries — click the game to try again');
+    return;
+  }
+  retries++;
+  clearTimeout(retryTimer);
+  // Comfortably past Chrome's ~1.25s cooldown.
+  retryTimer = setTimeout(() => {
+    if (!wantLock || document.pointerLockElement === canvasEl) return;
+    lockLog('retry ' + retries + ' after the browser cooldown');
+    askOnce(true);
+  }, 1500);
+}
+
+canvasEl.addEventListener('click', () => takeLock('canvas click'));
+// The click that recaptures often lands on an overlay rather than the canvas,
+// and a mousedown anywhere in the page is still a user gesture, so honour it.
+document.addEventListener('mousedown', () => {
+  if (wantLock && !document.pointerLockElement) takeLock('mousedown re-acquire');
 });
+
+// ---- pointer lock diagnostics --------------------------------------------
+//
+// Three theories survived reading the sources — never granted, granted then
+// revoked by the engine, or granted but SDL not believing it — and they are
+// indistinguishable from the symptom. They are trivially distinguishable from
+// a transition log, so log it: every change, with the elapsed time, into the
+// same console panel the telemetry uses (the "log" button, bottom right).
+const lockT0 = Date.now();
+const lockCount = { granted: 0, lost: 0, refused: 0, asked: 0 };
+let lastGrant = 0;
+const diagEl = document.getElementById('diag');
+
+// Bump on every deploy that changes this file. It is shown on screen so a
+// screenshot answers "are you even on the new build?" without anyone having to
+// read a cache header.
+const BUILD = '20260805e';
+
+function renderDiag() {
+  if (TOUCH) { diagEl.style.display = 'none'; return; }
+  const held = document.pointerLockElement === canvasEl;
+  diagEl.innerHTML =
+    'build <b>' + BUILD + '</b><br>'
+    + 'pointer lock <b class="' + (held ? 'held' : 'none') + '">'
+    + (held ? 'HELD' : 'NOT HELD') + '</b><br>'
+    + 'asked ' + lockCount.asked + ' · got ' + lockCount.granted
+    + ' · lost ' + lockCount.lost + ' · refused ' + lockCount.refused;
+}
+
+function lockLog(msg) {
+  say('[lock +' + ((Date.now() - lockT0) / 1000).toFixed(1) + 's] ' + msg);
+  renderDiag();
+}
+
+// The log is a scrolling div, which is fiddly to select on a desktop and worse
+// on a phone, and a bug report that cannot be pasted is a bug report nobody
+// sends. One button, whole buffer.
+document.getElementById('copylog').addEventListener('click', () => {
+  const text = 'build ' + BUILD + ' · ' + navigator.userAgent + '\n'
+    + [...logEl.children].map(d => d.textContent).join('\n');
+  navigator.clipboard.writeText(text).then(
+    () => say('log copied to clipboard', 'ok'),
+    () => {
+      // Clipboard access can be refused; falling back to a selection at least
+      // leaves it one Ctrl+C away rather than dead.
+      const r = document.createRange();
+      r.selectNodeContents(logEl);
+      const s = getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      say('could not write to the clipboard — log selected, press Ctrl+C', 'e');
+    });
+});
+
 document.addEventListener('pointerlockchange', () => {
-  if (booted && !document.pointerLockElement) {
+  const held = document.pointerLockElement === canvasEl;
+  if (held) {
+    lockCount.granted++;
+    lastGrant = Date.now();
+    retries = 0;          // a success clears the budget for the next Esc
+    clearTimeout(retryTimer);
+    lockLog('GRANTED');
+  } else {
+    lockCount.lost++;
+    // How long it survived is the tell. A few milliseconds means the engine
+    // revoked it on its next frame; seconds means a human pressed Esc.
+    const ms = lastGrant ? Date.now() - lastGrant : -1;
+    lockLog('LOST after ' + ms + 'ms'
+      + (ms >= 0 && ms < 500 ? ' — engine revoked it, not you' : '')
+      + (wantLock ? ' (still wanted)' : ''));
+  }
+  if (!booted) return;
+  if (held) {
+    statusEl.textContent = '';
+  } else if (wantLock) {
     statusEl.textContent = 'mouse released — click to recapture';
     setTimeout(() => { if (!document.pointerLockElement) statusEl.textContent = ''; }, 3000);
   }
+});
+// A refused lock is otherwise completely silent, and its symptom — mouse-look
+// that works but stops at the window edge — looks like a game bug rather than
+// a permission one. The browser refuses for mundane reasons (Chrome imposes a
+// short cooldown after Esc), so say it and let the player click again.
+document.addEventListener('pointerlockerror', () => {
+  lockCount.refused++;
+  lockLog('REFUSED by the browser');
+  scheduleRetry();
+  if (!booted) return;
+  statusEl.textContent = 'could not capture the mouse — click the game again';
+  setTimeout(() => { if (!document.pointerLockElement) statusEl.textContent = ''; }, 3000);
 });
 
 // ---- touch controls ------------------------------------------------------
@@ -412,8 +597,19 @@ function look(dx, dy) {
   // clientX/clientY move too: when the engine has not got a pointer lock (it
   // cannot, on a phone) SDL derives the relative motion from the absolute
   // position instead, so sending only movementX would arrive as no motion.
-  virtX = Math.max(0, Math.min(window.innerWidth, virtX + dx));
-  virtY = Math.max(0, Math.min(window.innerHeight, virtY + dy));
+  //
+  // And therefore this cursor must NOT be clamped to the viewport. It was, and
+  // that was the "turning stops when you reach the edge" bug on phones: once
+  // virtX saturated at innerWidth every later event reported the same clientX,
+  // SDL saw a zero delta, and the view froze — a one-way ratchet that stayed
+  // stuck until an equal drag back the other way un-pinned it. On a 390px
+  // phone the right-hand look zone gave about 177px of travel before it died.
+  // Nothing reads these as a screen position, so they are free to run past the
+  // viewport; the delta between consecutive events is the only thing that
+  // matters. Do not "fix" the large numbers by recentring either — a jump in
+  // clientX is indistinguishable from a real flick and snaps the view.
+  virtX += dx;
+  virtY += dy;
   canvasEl.dispatchEvent(new MouseEvent('mousemove', {
     movementX: dx, movementY: dy, clientX: virtX, clientY: virtY,
     bubbles: true, cancelable: true, composed: true,
@@ -558,6 +754,7 @@ function boot(args, pkg, files) {
 
 function showExited(msg) {
   booted = false;  // stop the canvas click handler re-capturing over the overlay
+  wantLock = false;  // ...and stop the mousedown re-acquire fighting this exit
   if (document.pointerLockElement) document.exitPointerLock();
   hopEl.style.display = 'none';
   const o = document.createElement('div');
@@ -615,11 +812,27 @@ function showExited(msg) {
   if (Object.prototype.hasOwnProperty.call(WEAPON_MODES, WEAPON)) {
     args.push('+set', 'p2w_weapon', WEAPON_MODES[WEAPON]);
   }
+  // freelook on every device, not just touch: with it off the engine reads
+  // vertical mouse motion as *walking*, so a desktop player cannot look up or
+  // down and pushing the mouse forward marches them into whatever is ahead.
+  // That is 1994 Doom's default and nobody expects it now — and it reads as
+  // "the mouse is broken", which is exactly the complaint it turned up in.
+  args.push('+set', 'freelook', '1');
+  // Keep the engine from handing the mouse back. Measured 2026-08-05: the page
+  // takes the pointer lock, the log reads GRANTED and then immediately LOST.
+  // That is GZDoom's I_CheckNativeMouse deciding it wants the native cursor
+  // and calling _emscripten_exit_pointerlock — it wants native whenever the
+  // mouse is disabled, or whenever it thinks the window is in the background,
+  // which a canvas that has never held focus looks exactly like.
+  //   use_mouse/m_use_mouse — do not switch to the native cursor on principle
+  //   i_pauseinbackground   — do not pause (and release) when it believes it
+  //                           has lost focus, which in wasm it wrongly does
+  args.push('+set', 'use_mouse', '1', '+set', 'm_use_mouse', '1',
+            '+set', 'i_pauseinbackground', '0');
   if (TOUCH) {
-    // A drag has to look up and down, and with freelook off the engine reads
-    // vertical mouse motion as walking. cl_run because an 800m tile is a long
-    // way at Doom's walking pace and a phone has no shift key.
-    args.push('+set', 'freelook', '1', '+set', 'cl_run', '1');
+    // cl_run because an 800m tile is a long way at Doom's walking pace and a
+    // phone has no shift key.
+    args.push('+set', 'cl_run', '1');
   }
   if (qs.get('fps') === '1') args.push('+vid_fps', '1');
   const cmds = qs.get('cmd');

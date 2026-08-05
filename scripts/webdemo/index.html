@@ -40,6 +40,22 @@
          border-top:1px solid var(--border)}
   footer a{color:#9ab}
   .k{color:var(--text)}
+  .wip{max-width:980px;margin:0 auto;padding:0 20px 4px}
+  .wip div{background:#1c1710;border:1px solid #4a3a1c;color:#d8c89a;
+           padding:9px 12px;font-size:11px;line-height:1.6}
+  #find{max-width:980px;margin:0 auto;padding:14px 20px 0;display:flex;
+        gap:8px;flex-wrap:wrap;align-items:center}
+  #find input{background:var(--panel);color:var(--text);font:inherit;
+              border:1px solid var(--border);padding:7px 10px;width:150px;
+              text-transform:uppercase}
+  #find input::placeholder{color:var(--dim);text-transform:none}
+  #find button{background:var(--panel);color:var(--text);font:inherit;
+               border:1px solid var(--border);padding:7px 14px;cursor:pointer}
+  #find button:hover{border-color:var(--accent)}
+  #find button[disabled]{opacity:.5;cursor:default}
+  #pcmsg{color:var(--dim);font-size:11px;flex:1 1 240px;min-width:0}
+  #pcmsg.warn{color:#d8c89a}
+  #pcmsg.err{color:#e08a8a}
 </style>
 </head>
 <body>
@@ -48,9 +64,22 @@
   <p class="intro">Every square below is 800&nbsp;m of real England, generated
   from Environment&nbsp;Agency 1&nbsp;m LIDAR and OpenStreetMap: real building
   footprints at measured heights, sloped terrain, hedges, trees. Click a
-  square to walk it. <span class="k">WASD</span> moves, mouse looks; desktop
-  only. Dark squares are the sea.</p>
+  square to walk it. <span class="k">WASD</span> moves and the mouse looks on a
+  desktop; phones get on-screen controls. Dark squares are the sea.</p>
 </header>
+
+<div class="wip"><div><strong>Work in progress.</strong> Thanet is the only
+district built so far &mdash; more regions are coming as the LIDAR for them is
+mirrored. Expect rough edges: this is a project in the open, not a finished
+product.</div></div>
+
+<div id="find">
+  <label for="pc" style="color:var(--dim)">Find your postcode:</label>
+  <input id="pc" placeholder="e.g. CT1 2EH" autocomplete="postal-code"
+         spellcheck="false" maxlength="9">
+  <button id="pcgo" type="button">Go</button>
+  <span id="pcmsg"></span>
+</div>
 
 <div id="districts"></div>
 <div id="mapwrap"><div id="grid"></div></div>
@@ -66,8 +95,10 @@
   GPLv3 &mdash; source at those links. Game assets:
   <a href="https://freedoom.github.io/">Freedoom</a> (modified BSD).
   Each level embeds its own ATTRIBUTION.txt.<br>
-  Generator: <span class="k">postcode2wad</span> &mdash; type a UK postcode,
-  get a playable GZDoom level of that real place.
+  Postcode lookup by <a href="https://postcodes.io/">postcodes.io</a>.<br>
+  Generator: <span class="k">postcode2wad</span> &mdash; UK open geospatial
+  data turned into playable GZDoom levels. Built by
+  <a href="https://www.linkedin.com/in/jamesmoores">James Moores</a>.
 </footer>
 
 <script>
@@ -76,8 +107,19 @@ const grid = document.getElementById('grid');
 const tabs = document.getElementById('districts');
 const sub = document.getElementById('sub');
 
+// Manifests are fetched once and shared: the grid needs the district you are
+// looking at, the postcode search needs every district at once to answer
+// "is this covered anywhere?".
+const manifests = new Map();
+function manifest(slug) {
+  if (!manifests.has(slug)) {
+    manifests.set(slug, fetch(slug + '/manifest.json').then(r => r.json()));
+  }
+  return manifests.get(slug);
+}
+
 async function showDistrict(slug) {
-  const m = await (await fetch(slug + '/manifest.json')).json();
+  const m = await manifest(slug);
   const t = m.tiles;
   const ixs = t.map(x => x.ix), iys = t.map(x => x.iy);
   const x0 = Math.min(...ixs), x1 = Math.max(...ixs);
@@ -118,8 +160,93 @@ async function showDistrict(slug) {
   sub.textContent = m.district + ' — ' + t.length + ' playable squares';
 }
 
+// ---- postcode search ------------------------------------------------------
+//
+// A postcode is only a way of naming a coordinate, so this resolves it to a
+// national-grid easting/northing and asks whether any built tile covers it.
+// Tile ids are `bng<size>-<ix>-<iy>` with ix = easting / size_m, so the test
+// is exact arithmetic against the manifest rather than a distance search.
+//
+// The "not covered" answer matters as much as the hit: most of the UK is not
+// built yet, and a lookup that just failed would read as a broken site rather
+// than as the honest state of the project.
+let districtList = [];
+const pcInput = document.getElementById('pc');
+const pcGo = document.getElementById('pcgo');
+const pcMsg = document.getElementById('pcmsg');
+
+function says(text, kind) {
+  pcMsg.textContent = text;
+  pcMsg.className = kind || '';
+}
+
+async function findPostcode() {
+  const raw = pcInput.value.trim();
+  if (!raw) return;
+  pcGo.disabled = true;
+  says('looking up…');
+  try {
+    const r = await fetch('https://api.postcodes.io/postcodes/'
+                          + encodeURIComponent(raw.replace(/\s+/g, '')));
+    if (r.status === 404) {
+      says('No such UK postcode — check the spelling.', 'err');
+      return;
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const res = (await r.json()).result;
+
+    // Two different "not on the British grid" cases, and both must be caught
+    // before the tile arithmetic runs.
+    //
+    // The islands get a zeroed grid reference rather than a missing one, so a
+    // 0 means "no GB grid", not a postcode at the grid origin off Land's End.
+    //
+    // Northern Ireland is the dangerous one: it comes back with *populated*
+    // eastings and northings on the Irish grid, whose numbers overlap the
+    // British grid's range. Belfast currently answers "coming soon" only
+    // because its Irish-grid coordinate happens to miss Thanet — add a
+    // district in the wrong place and an NI postcode would match a tile in
+    // Kent and cheerfully load it. The LIDAR is Environment Agency, England
+    // only, so anything outside GB is out of scope regardless.
+    if (res.country === 'Northern Ireland' || !res.eastings || !res.northings) {
+      says(`${res.postcode} is outside the British National Grid, `
+           + 'so there is no Environment Agency LIDAR for it.', 'warn');
+      return;
+    }
+
+    for (const d of districtList) {
+      const m = await manifest(d.slug);
+      const ix = Math.floor(res.eastings / m.size_m);
+      const iy = Math.floor(res.northings / m.size_m);
+      const hit = m.tiles.find(t => t.ix === ix && t.iy === iy);
+      if (hit) {
+        says(`${res.postcode} → ${hit.title}. Loading…`);
+        location.href = 'play.html?d=' + encodeURIComponent(d.slug)
+                      + '&tile=' + encodeURIComponent(hit.id);
+        return;
+      }
+    }
+
+    // Name the place rather than saying "not found": it is the difference
+    // between "this site is broken" and "your area is not built yet".
+    const where = res.admin_district || res.country || 'That area';
+    says(`${res.postcode} is in ${where}, which isn't built yet — `
+         + 'more regions coming soon.', 'warn');
+  } catch (err) {
+    says('Postcode lookup is unavailable right now — '
+         + 'pick a square from the map instead.', 'err');
+  } finally {
+    pcGo.disabled = false;
+  }
+}
+
+pcGo.addEventListener('click', findPostcode);
+pcInput.addEventListener('keydown', ev => {
+  if (ev.key === 'Enter') findPostcode();
+});
+
 fetch('districts.json').then(r => r.json()).then(listing => {
-  const ds = listing.districts;
+  const ds = districtList = listing.districts;
   for (const d of ds) {
     const b = document.createElement('button');
     b.textContent = d.name + ' (' + d.tiles + ')';

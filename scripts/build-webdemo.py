@@ -8,7 +8,14 @@ one *standalone single-tile PK3 per built tile*, each tile's minimap as a
 plain PNG, per-district manifests, and two pages — a coverage map (click a
 tile, pick a performance mode, spawn on it) and a launcher. Upload the
 directory to any static host that can set two response headers; `_headers`
-carries them for Netlify.
+carries them for Netlify. (On the live R2 host `_headers` is inert — it is
+just an uploaded file there, and the headers come from a Cloudflare Transform
+Rule instead. The launcher's own error text still points at it, which is
+misleading if you are debugging the deployed site rather than a Netlify one.)
+
+The run ends by writing `.br` sidecars for the two files no CDN will compress
+for you, and printing the exact rclone lines that upload them under the
+uncompressed keys — see `precompress`.
 
 Districts accumulate: each run adds (or replaces) one district under
 `site/<slug>/` and updates `districts.json`, so Thanet is just the first
@@ -73,6 +80,22 @@ IWAD = "freedoom2.wad"
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "webdemo"
 TEMPLATE_FILES = ["index.html", "play.html", "_headers", "serve.py"]
+
+#: Files pre-compressed for upload, and why only these two. Cloudflare
+#: auto-compresses a fixed content-type list: `.wasm` and `.js` are on it and
+#: arrive zstd'd, but everything else here is `application/octet-stream`, which
+#: is not, so it arrives raw. Measured on the live site 2026-08-05: uzdoom.data
+#: and freedoom2.wad were 86.4 MB of the ~102 MB cold load, both uncompressed.
+#: The other octet-streams are PK3s — zip archives already, and gzip only takes
+#: common.pk3 to 99%, so compressing them buys nothing. These two are raw
+#: lump/asset containers and go to ~28%.
+PRECOMPRESS = ["uzdoom.data", IWAD]
+
+#: q11 costs ~70s for the IWAD and ~3min for the data package, against q9's 8s.
+#: Worth it: q11 takes the IWAD to 28% where q9 stops at 34%, this runs once per
+#: engine change (the `.br` is reused while it is newer than its source), and
+#: the alternative is every visitor paying the difference on a cold load.
+BROTLI_QUALITY = 11
 
 
 def build_tile_pk3(artifact: Path, out: Path) -> dict | None:
@@ -152,6 +175,48 @@ def split_common(pk3s: list[Path], common_out: Path) -> int:
     return len(shared)
 
 
+def _compressor():
+    """(suffix, Content-Encoding, compress) — brotli if installed, else gzip.
+
+    Brotli is not in the dependencies because it is needed only to deploy, not
+    to build a WAD, and a missing wheel should not stop a build. The fallback
+    is honest rather than silent: gzip still takes the two files from 86.4 MB
+    to 32.0 MB where brotli reaches ~25 MB, and the caller prints which ran.
+    """
+    try:
+        import brotli
+    except ImportError:
+        import gzip
+
+        return ".gz", "gzip", lambda b: gzip.compress(b, 9)
+    return ".br", "br", lambda b: brotli.compress(b, quality=BROTLI_QUALITY)
+
+
+def precompress(paths: list[Path]) -> tuple[str, str, list[tuple[Path, int, int]]]:
+    """Write `<name><suffix>` beside each path for upload with Content-Encoding.
+
+    The compressed file sits *beside* the original rather than replacing it:
+    `serve.py` and `--engine-dir site/engine` both want the real bytes, and a
+    file whose name says `.data` but whose contents are brotli is exactly the
+    kind of thing that renders fine and fails later. The deploy step uploads
+    the `.br` under the *uncompressed* key, so the browser sees one URL.
+
+    Skipped when the compressed file is newer than its source, because q11 on
+    the data package is minutes and the engine changes about never.
+    """
+    suffix, encoding, compress = _compressor()
+    done = []
+    for src in paths:
+        dst = src.with_name(src.name + suffix)
+        if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+            done.append((dst, src.stat().st_size, dst.stat().st_size))
+            continue
+        print(f"  compressing {src.name} ({src.stat().st_size / 1e6:.0f} MB)…", flush=True)
+        dst.write_bytes(compress(src.read_bytes()))
+        done.append((dst, src.stat().st_size, dst.stat().st_size))
+    return suffix, encoding, done
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="build-webdemo.py", description=__doc__)
     parser.add_argument("--work", required=True, metavar="DIR", help="district work dir")
@@ -161,6 +226,11 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         metavar="DIR",
         help=f"directory holding {ENGINE_FILES[0]}..{ENGINE_FILES[-1]} and {IWAD}",
+    )
+    parser.add_argument(
+        "--no-precompress",
+        action="store_true",
+        help="skip building the .br sidecars (minutes); leaves any existing ones alone",
     )
     args = parser.parse_args(argv)
 
@@ -253,6 +323,21 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(listing['districts'])} district(s): "
         + ", ".join(d["name"] for d in listing["districts"])
     )
+    if not args.no_precompress:
+        _suffix, encoding, made = precompress([out / "engine" / f for f in PRECOMPRESS])
+        raw = sum(o for _, o, _ in made)
+        packed = sum(c for _, _, c in made)
+        print(
+            f"precompressed ({encoding}): {raw / 1e6:.0f} MB -> {packed / 1e6:.0f} MB "
+            f"({packed * 100 // raw}%), saving {(raw - packed) / 1e6:.0f} MB per cold load"
+        )
+        # Deliberately does *not* print the rclone lines. These files have to be
+        # uploaded under the uncompressed key with a Content-Encoding header,
+        # and a bare `rclone sync` undoes that twice over — so there is one
+        # place that knows how, and this points at it rather than tempting
+        # anyone to copy half of it.
+        print(f"deploy with: python scripts/deploy-webdemo.py --site {out}")
+
     print(f"wrote {out}/ — preview with: python {out}/serve.py")
     return 0
 

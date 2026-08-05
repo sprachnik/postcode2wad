@@ -7,7 +7,9 @@ and is wrong on first-mover; it is kept for the record.)*
 
 ## Why this is worth doing
 
-The "can it run Doom" space has no real-world-geodata entry. All existing Doom map generation is procedural (OBLIGE/Obsidian lineage). Minecraft has Build the Earth and Arnis; Doom has nothing. First-mover claim on the whole "Doom Earth" category. Golden demo: **"Play Doom in Birchington"** — spawn at a real postcode.
+The "can it run Doom" space has no real-world-geodata entry. All existing Doom map generation is procedural (OBLIGE/Obsidian lineage). Minecraft has Build the Earth and Arnis; Doom has nothing. First-mover claim on the whole "Doom Earth" category. Golden demo: **"Play Doom in Birchington"** — spawn at a real Thanet postcode.
+
+*(Written 2 Aug and left as written. The first-mover claim is wrong: geocraft (2015) already combined postcode input, UK LIDAR and OSM. See [`prior-art.md`](prior-art.md) — this section is kept for the record, not as a current claim.)*
 
 **Pre-announce TODO:** search Doomworld forums directly for prior art (poorly indexed by Google). Search terms: "real world", "OSM", "OpenStreetMap", "lidar", "my house", "my street" in the WADs & Mods and Editing sections.
 
@@ -99,4 +101,4 @@ Fully open source, released free on itch.io.
 
 ## Acceptance test
 
-`postcode2wad` on a real postcode produces a PK3 that loads in current GZDoom with Freedoom Phase 2, spawns the player on the street at the postcode centroid, terrain visibly matches the real village (streets, church, coastline recognisable on the automap), stable 60fps+, no console errors.
+`postcode2wad` on a residential postcode produces a PK3 that loads in current GZDoom with Freedoom Phase 2, spawns the player on the street at the postcode centroid, terrain visibly matches the real village (streets, church, coastline recognisable on the automap), stable 60fps+, no console errors.

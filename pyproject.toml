@@ -28,6 +28,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.5"]
+# Only for deploying the web demo, never for building a WAD, so it stays out of
+# the runtime dependencies. build-webdemo.py falls back to gzip without it and
+# says which it used — but the fallback costs about 8 MB on every cold load
+# (86.4 MB of engine files go to 23.9 MB under brotli q11, 32.0 under gzip).
+web = ["Brotli>=1.1"]
 
 [project.scripts]
 postcode2wad = "postcode2wad.cli:main"

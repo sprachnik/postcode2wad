@@ -220,7 +220,7 @@ GZDoom: `common.pk3 + tile.pk3` loads MAP01 with zero missing-lump lines.
 **Districts accumulate.** Each `build-webdemo.py` run replaces one district
 under `site/<slug>/` and updates `districts.json`; the index grows tabs when
 there is more than one. The rest of Kent is `build-district.py` then
-`build-webdemo.py` per district, plus an rclone sync.
+`build-webdemo.py` per district, then `deploy-webdemo.py`.
 
 ## Hosting (verified 2026-08-04, official docs)
 
@@ -247,9 +247,38 @@ not the bucket:
   HIT` on the 57 MB data package: repeat traffic never touches the bucket,
   so no meter on the site scales with popularity.
 
-Deploying is `python scripts/build-webdemo.py …` then
-`rclone sync site r2:doommap` (rclone remote configured against the bucket's
-S3 endpoint with an R2 API token scoped to the one bucket).
+Deploying is `python scripts/build-webdemo.py …` then `python
+scripts/deploy-webdemo.py` (rclone remote configured against the bucket's S3
+endpoint with an R2 API token scoped to the one bucket).
+
+**It is not a bare `rclone sync` any more, and a bare sync would silently make
+the site slower.** Measured 2026-08-05: `uzdoom.data` (57.6 MB) and
+`freedoom2.wad` (28.8 MB) were arriving *uncompressed* — 86.4 MB of a ~102 MB
+cold load — because Cloudflare only auto-compresses a fixed content-type list.
+`.wasm` and `.js` are on it and arrive zstd'd; `application/octet-stream` is
+not. The PK3s are zip archives already (gzip takes `common.pk3` to 99%), so
+those two raw containers were the whole of the loss. Brotli q11 takes them to
+23.9 MB, cutting the cold load to ~40 MB.
+
+They are therefore stored *pre-compressed*, under the uncompressed key, with
+`Content-Encoding: br` set on the object — R2 does no content negotiation of
+its own. `build-webdemo.py` writes the `.br` sidecars beside the originals
+(the originals stay: `serve.py` and `--engine-dir site/engine` both want real
+bytes) and `deploy-webdemo.py` excludes those two keys from the sync and
+maintains them with `copyto`. A plain sync would undo it twice over — upload
+the raw 57 MB over the compressed object, *and* upload the `.br` as a second
+key nobody requests.
+
+Safe because `grabRaw` in `play.html` is `fetch()` + `arrayBuffer()`, which
+decodes transparently, and the progress bar counts files rather than bytes.
+Every browser that can run this (SharedArrayBuffer + WebGL2) has had brotli
+for years. Verify after a deploy — the failure mode is a 200 with no
+`Content-Encoding`, which looks perfectly fine and is 62 MB slower:
+
+```
+curl -sSI -H 'Accept-Encoding: br' \
+  https://doomearth.clawhangout.com/engine/uzdoom.data | grep -i content-
+```
 
 **And then bump `PK3_V` in `play.html`.** The long cache rule is what makes
 repeat traffic free, and it is also a 30-day trap: tile PK3s and
