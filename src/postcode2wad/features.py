@@ -244,6 +244,72 @@ def roads_to_shapes(
     return shapes
 
 
+#: Corridor width by railway kind, in metres.
+#:
+#: A single standard-gauge track occupies about 4m of ballast; two tracks with
+#: the six-foot between them is about 9m, which is what most of the network
+#: through Kent is. Sidings and yards are wider but rarely mapped as one way.
+RAILWAY_WIDTHS = {
+    "rail": 9.0,
+    "light_rail": 6.0,
+    "subway": 6.0,
+    "tram": 5.0,
+    "narrow_gauge": 4.0,
+    "preserved": 6.0,
+    "disused": 6.0,
+    "siding": 5.0,
+    "spur": 5.0,
+    "yard": 12.0,
+}
+
+#: Never rendered as a corridor: these are points, areas or abstractions rather
+#: than track, and buffering them puts a ballast strip through a car park.
+RAILWAY_SKIP = {
+    "station", "halt", "platform", "subway_entrance", "level_crossing",
+    "crossing", "signal", "switch", "buffer_stop", "milestone", "razed",
+    "abandoned", "construction", "proposed", "turntable", "roundhouse",
+}
+
+
+def railways_to_shapes(
+    features: list[Feature],
+    tile: Tile,
+    simplify_m: float = 0.5,
+) -> list[Shape]:
+    """Buffer railway centrelines into a ballasted corridor.
+
+    The same shape as `roads_to_shapes` and for the same reason: a railway is an
+    engineered surface, level across its width and graded along its length, so
+    it wants its height from its own centreline rather than from the ground
+    field. Birchington has a station and had no track at all — nothing in the
+    pipeline read the `railway` key, so the line through the village was open
+    grass with a building beside it.
+    """
+    clip = tile_clip(tile)
+    simplify_units = simplify_m * UNITS_PER_METRE
+
+    shapes: list[Shape] = []
+    for feature in features:
+        kind = feature.tags.get("railway", "")
+        if kind in RAILWAY_SKIP:
+            continue
+        width_m = parse_length(feature.tags.get("width")) or RAILWAY_WIDTHS.get(kind)
+        if not width_m:
+            continue
+
+        line = _map_line(feature, tile)
+        if line is None:
+            continue
+        corridor = line.buffer(
+            width_m * UNITS_PER_METRE / 2.0,
+            cap_style=2,
+            join_style=2,
+        )
+        for part in _clean(corridor, clip, simplify_units):
+            shapes.append(Shape(polygon=part, tags=feature.tags, centre=line))
+    return shapes
+
+
 def _map_line(feature: Feature, tile: Tile) -> LineString | None:
     """A feature's coordinates as a map-unit LineString, or None if degenerate."""
     points = [tile.to_map_lonlat(lon, lat) for lon, lat in feature.coords]

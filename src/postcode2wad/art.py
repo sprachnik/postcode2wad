@@ -217,6 +217,11 @@ GROUNDS = (
     # Marsh. North Kent and Romney are marsh, and natural=wetland was falling
     # through to bare terrain. Between meadow and water: wet, dark, unmown.
     Ground("DMMARSH", (86, 100, 70), blotch=0.20, grain=0.10, cells=4),
+    # Ballast. Coarse grey stone with the sleepers reading across it — the
+    # stripes are at 64px, which at 32 px/m is a sleeper every 2m. Birchington
+    # had a station and no track before this existed.
+    Ground("DMRAIL", (104, 100, 96), blotch=0.13, grain=0.20, cells=9,
+           stripes=(64, 0.14)),
 )
 
 GROUND_BY_NAME = {ground.name: ground for ground in GROUNDS}
@@ -375,6 +380,19 @@ FACADES = (
         "H", (168, 194, 200), (196, 214, 218), (150, 160, 164),
         courses=None, scatter=0.02, style="glass",
     ),
+    # Curtain wall, for anything too tall to be a house.
+    #
+    # Every other façade is drawn once and *stretched* to the wall, which works
+    # because MAX_STOREYS is 4 and a four-storey texture over a four-storey
+    # building is one-to-one. Over a tower it is grotesque: the same texture
+    # across 310m of the Shard makes each window 77m tall. This one is drawn to
+    # tile seamlessly instead, one texture-storey per real storey, so a 40-floor
+    # building gets 40 floors rather than four enormous ones. See the scaley in
+    # `building_facade`.
+    Facade(
+        "T", (64, 78, 92), (92, 108, 124), (150, 164, 178),
+        courses=None, scatter=0.02, style="tower",
+    ),
 )
 FACADE_BY_KEY = {facade.key: facade for facade in FACADES}
 
@@ -396,6 +414,9 @@ def facade_png(facade: Facade, storeys: int, seed: int = 1) -> bytes:
 
     rgb = _masonry(rng, facade, h, w, px_per_m_x, px_per_m_y)
 
+    if facade.style == "tower":
+        _curtain_wall(rgb, facade, h, w, storeys, px_per_m_x, px_per_m_y)
+        return _encode(rgb)
     if facade.style == "glass":
         _glasshouse(rgb, facade, h, w, px_per_m_x, px_per_m_y)
         return _encode(rgb)
@@ -448,6 +469,26 @@ def _industrial(rgb, facade: Facade, rng, h: int, w: int, storeys: int,
     # Horizontal slats.
     for y in range(top, h, max(2, int(0.25 * px_y))):
         rgb[y:y + 1, left:left + door_w] = facade.mortar
+
+
+def _curtain_wall(rgb, facade: Facade, h: int, w: int, storeys: int,
+                  px_x: float, px_y: float) -> None:
+    """Glazing and spandrel, repeating, with no top or bottom.
+
+    Every storey is identical on purpose: this texture tiles up the wall rather
+    than being stretched to fit it, so it must have no eaves, no ground floor
+    and no door — anything that belongs at one end would appear on every floor.
+    """
+    band = max(2, STOREY_PX // 6)  # the opaque spandrel between floors
+    for storey in range(storeys):
+        top = storey * STOREY_PX
+        rgb[top:top + STOREY_PX] = _GLASS
+        # Glazing is lighter towards the top of each floor, where it takes sky.
+        rgb[top:top + STOREY_PX // 3] = _GLASS_SKY
+        rgb[top:top + band] = facade.brick
+    # Mullions every 1.5m, which is a normal curtain-wall module.
+    for x in range(0, w, max(3, int(1.5 * px_x))):
+        rgb[:, x:x + max(1, int(0.1 * px_x))] = facade.trim
 
 
 def _glasshouse(rgb, facade: Facade, h: int, w: int, px_x: float, px_y: float) -> None:

@@ -22,6 +22,7 @@ from .features import (
     beach_from_coastline,
     buildings_to_shapes,
     landuse_to_shapes,
+    railways_to_shapes,
     roads_to_shapes,
     sea_from_coastline,
     tile_clip,
@@ -40,7 +41,17 @@ from .terrain import (
 from .tiles import Tile
 
 #: Headroom above the highest ground before the sky plane.
-SKY_CLEARANCE = 4096
+#:
+#: 4096 units is 128m, which is enough for anywhere the generator has been
+#: pointed so far and is not enough for a city. The Shard is 310m (9,920 units)
+#: and would stand straight through the sky. Raised to clear the tallest
+#: building in Britain, since a sky plane costs nothing but a number — the
+#: sector is empty air either way.
+SKY_CLEARANCE = 12288  # 384m
+
+#: Above this, a LIDAR-measured building height is treated as an artefact.
+#: Deliberately above the Shard (310m); see the note at the measurement.
+MAX_MEASURED_HEIGHT_M = 350.0
 
 #: Roads sit a kerb's depth below the surrounding ground.
 KERB_UNITS = 8
@@ -135,6 +146,7 @@ class BuildStats:
     beach: int = 0
     landuse: int = 0
     barriers: int = 0
+    railways: int = 0
     trees: int = 0
     terrain_bands: int = 0
     sectors: int = 0
@@ -157,7 +169,8 @@ class BuildStats:
             f"{self.buildings} buildings, {self.roads} road pieces, "
             f"{self.water} water, {self.sea} sea, {self.beach} beach, "
             f"{self.landuse} land parcels, "
-            f"{self.barriers} barriers, {self.trees} trees, "
+            f"{self.barriers} barriers, {self.railways} railway pieces, "
+            f"{self.trees} trees, "
             f"{self.terrain_bands} terrain bands, terrain {low:.1f}-{high:.1f}m\n"
             f"{self.sectors} sectors, {self.linedefs} linedefs"
         )
@@ -601,6 +614,27 @@ def build_tile(
                 )
                 stats.roads += 1
 
+    # Railways after roads, so a level crossing shows the road surface: you
+    # stand on the tarmac there, not on the ballast. Before barriers, so
+    # lineside fencing still sits on top of the corridor.
+    for shape in railways_to_shapes(features.railways, tile):
+        for piece, elevation_m in _split_by_bands(
+            shape.polygon, bands, terrain_at, with_slopes
+        ):
+            specs.append(
+                SectorSpec(
+                    polygon=piece,
+                    floor=round(elevation_m * UNITS_PER_METRE) - KERB_UNITS,
+                    ceiling=sky_height,
+                    floor_tex=textures.BALLAST,
+                    cover="rail",
+                    wall_tex=textures.KERB,
+                    light=ROAD_LIGHT,
+                    sloped=with_slopes,
+                )
+            )
+        stats.railways += 1
+
     if with_barriers:
         # After roads so a hedge along a verge survives, before buildings so a
         # house laid over one still wins — the hedge stops at the wall.
@@ -652,7 +686,15 @@ def build_tile(
         if dsm is not None and dtm is not None:
             measured = object_height_m(dsm, dtm, tile, shape.polygon)
             # Trust LIDAR when it gives a sane answer; fall back to OSM tags.
-            if 2.0 <= measured <= 80.0:
+            #
+            # The ceiling was 80m, which is under Big Ben (96m) — so every
+            # building in the country taller than about 25 storeys quietly
+            # ignored its own measurement and used whatever OSM said, or the
+            # default. It is there to reject DSM artefacts, and the measurement
+            # is a P90 inside the footprint, which a crane or a spike does not
+            # move. 350m clears the tallest building in Britain (the Shard, 310)
+            # while still rejecting the obviously impossible.
+            if 2.0 <= measured <= MAX_MEASURED_HEIGHT_M:
                 height_m = measured
         # The façade covers the wall exactly once, so scaley depends on the
         # building's measured height. scalex stays 1: the texture is authored at

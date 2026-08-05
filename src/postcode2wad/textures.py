@@ -35,6 +35,7 @@ GRAVEL = "DMGRAVEL"
 WATER = "DMWATER"
 CHALK = "DMCHALK"
 MARSH = "DMMARSH"
+BALLAST = "DMRAIL"
 #: Seen from above, a clipped hedge is just dense foliage.
 HEDGE_TOP = WOODLAND
 
@@ -185,6 +186,14 @@ def building_storeys(height_m: float) -> int:
 #: is worse than a domestic one on a small unit, so the threshold errs high.
 BIG_FOOTPRINT_M2 = 400.0
 
+#: Height above which a building gets the curtain wall whatever it is tagged.
+#:
+#: 20m is about six storeys — above a Victorian terrace and every domestic form
+#: in the country, and below nothing that matters. The LIDAR measures these
+#: correctly (the height is real, from DSM−DTM); it was only the drawing that
+#: could not take it.
+TALL_M = 20.0
+
 
 def building_facade(
     tags: dict[str, str], osm_id: int, height_m: float, footprint_m2: float = 0.0
@@ -206,8 +215,20 @@ def building_facade(
         else:
             key = DOMESTIC_FACADES[osm_id % len(DOMESTIC_FACADES)]
 
+    # Height overrides the tag. Whatever a 40m building is tagged as, it is not
+    # a house, and stretching a four-storey façade over it makes each window
+    # taller than a bus. Anything above TALL_M gets the curtain wall.
+    if height_m >= TALL_M and key not in ("H",):
+        key = "T"
+
     storeys = building_storeys(height_m)
     wall_units = max(1.0, height_m * UNITS_PER_METRE)
+    if key == "T":
+        # Tile, do not stretch: one texture-storey per real storey, repeating up
+        # the wall. Doom scales a wall texture by division, so a scaley of
+        # STOREY_PX per storey-worth of units repeats it exactly once per floor
+        # however tall the building is.
+        return facade_name(key, storeys), STOREY_PX / (STOREY_M * UNITS_PER_METRE)
     return facade_name(key, storeys), (storeys * STOREY_PX) / wall_units
 
 

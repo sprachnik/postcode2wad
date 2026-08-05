@@ -50,6 +50,9 @@ TILE_SELECTORS = [
     'relation["natural"]',
     'way["waterway"="riverbank"]',
     'way["barrier"]',
+    # Railways. Birchington has a station and had no track: nothing read the
+    # key at all, so the line through the middle of the village was open grass.
+    'way["railway"]',
     'way["landuse"]',
     'way["leisure"]',
 ]
@@ -80,11 +83,14 @@ class TileFeatures:
     coastline: list[Feature] = field(default_factory=list)
     #: Hedges, fences and garden walls. Also open ways: extruded, not filled.
     barriers: list[Feature] = field(default_factory=list)
+    #: Track centrelines, buffered into a ballasted corridor like a road.
+    railways: list[Feature] = field(default_factory=list)
 
     def __len__(self) -> int:
         return (
             len(self.buildings)
             + len(self.roads)
+            + len(self.railways)
             + len(self.water)
             + len(self.landuse)
             + len(self.coastline)
@@ -160,6 +166,10 @@ def sort_features(features: list[Feature]) -> TileFeatures:
                 out.buildings.append(feature)
         elif "highway" in tags:
             out.roads.append(feature)
+        elif "railway" in tags:
+            # After highway on purpose: a level crossing carries both, and the
+            # road surface is the one you stand on.
+            out.railways.append(feature)
         elif "barrier" in tags and "waterway" not in tags:
             out.barriers.append(feature)
         elif tags.get("natural") == "coastline":
