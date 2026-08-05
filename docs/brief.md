@@ -1,13 +1,8 @@
 # Postcode → WAD — Project Brief
 
-**Date:** 2026-08-02 · **Status:** superseded in part — see the correction below.
-
-> **Read this first.** This is the *original* brief, kept because the plan it
-> sets out is still the plan. Its **pitch is wrong** and has been corrected in
-> place: the version written on 2 Aug claimed first-mover on the whole "Doom
-> Earth" category, and that is false. [`prior-art.md`](prior-art.md) records
-> what killed it and what survives. Nothing on this page should be quoted as a
-> novelty claim without checking there first.
+**Date:** 2026-08-02 · **Status:** current, except the positioning in "Why this
+is worth doing", which was revised on 5 Aug against
+[`prior-art.md`](prior-art.md).
 
 **One-liner:** Type a UK postcode, get a playable GZDoom level of that real
 place, generated from Environment Agency LIDAR terrain and OpenStreetMap
@@ -15,38 +10,34 @@ building footprints.
 
 ## Why this is worth doing
 
-**Corrected 5 Aug.** The original text is kept below the line because the
-reasoning that follows from it — the milestones, the geometry decisions — was
-sound and is still what the project is doing. The framing was not.
+Real geodata has been turned into game worlds before, including from a UK
+postcode using UK LIDAR ([geocraft](https://github.com/rob-murray/geocraft),
+2015) and into another BSP-format shooter
+([osm2vmf](https://github.com/lewa-j/osm2vmf), 2023). The distinctions that
+hold up are narrower and technical:
 
-What is actually true: real-world geodata has been turned into game worlds many
-times, including into UK-LIDAR-derived worlds from a postcode
-([geocraft](https://github.com/rob-murray/geocraft), 2015), and into other
-BSP-format shooters ([osm2vmf](https://github.com/lewa-j/osm2vmf), 2023). What
-survives is narrower and technical: one *measured* height per footprint rather
-than per raster column, sector-partition geometry rather than voxels or a mesh,
-and walkability that is measured rather than screenshotted. Those three are set
-out, with what refutes each rival, in [`prior-art.md`](prior-art.md).
+- one **measured** height per footprint, rather than per raster column;
+- **sector-partition geometry**, rather than a voxel grid or a triangle mesh;
+- **measured walkability** — one-sided-line sweeps, reachability by enclosure,
+  scripted walktests.
 
-> *Superseded, 2 Aug:* "The 'can it run Doom' space has no real-world-geodata
+[`prior-art.md`](prior-art.md) has the evidence for each, and the list of
+claims that did not survive.
+
+> *Original, 2 Aug:* "The 'can it run Doom' space has no real-world-geodata
 > entry. All existing Doom map generation is procedural (OBLIGE/Obsidian
 > lineage). Minecraft has Build the Earth and Arnis; Doom has nothing.
-> First-mover claim on the whole 'Doom Earth' category."
->
-> Three independent adversarial sweeps, each instructed to *refute* novelty,
-> killed every clause of it. Kept visible rather than deleted: the failure mode
-> it represents — writing a pitch before searching, then building on it — cost
-> more than the wrong sentence did.
+> First-mover claim on the whole 'Doom Earth' category." Written before the
+> prior-art search; superseded by it.
 
 Golden demo, unchanged: **"Play Doom in Birchington"** — spawn at a real Thanet
 postcode.
 
-**Pre-announce TODO, still open and still blocking:** search the Doomworld and
-ZDoom forums *by hand* for prior art. They are poorly indexed by Google and
-Cloudflare-blocked to every automated agent, so that corpus has never been
-swept — and it is exactly where a 2010s "I converted OSM into a WAD" thread
-would sit. Search terms: "real world", "OSM", "OpenStreetMap", "lidar", "my
-house", "my street" in the WADs & Mods and Editing sections.
+**Pre-announce TODO:** search the Doomworld and ZDoom forums by hand. They are
+poorly indexed by Google and Cloudflare-blocked to automated agents, so that
+corpus is unsearched, and it is where a 2010s "I converted OSM into a WAD"
+thread would sit. Search terms: "real world", "OSM", "OpenStreetMap", "lidar",
+"my house", "my street" in the WADs & Mods and Editing sections.
 
 ## Deliverable shape
 
@@ -64,7 +55,7 @@ gzdoom -iwad freedoom2.wad -file birchington.pk3 +map MAP01
 - **M2 — Dressing.** Roads/pavements, land-cover flats, tree sprites from DSM−DTM blobs, texture themes from OSM tags (church/pub/shop), generated street-name sign textures, skybox/fog/streetlight dynamic lights, basic monster + item placement, keys on landmarks. **Geolocation HUD**: live lat/lng + OS grid ref of the player, via per-tile georeference baked into the map (affine: origin easting/northing @ 32 units/m) read by a ZScript HUD element; use a precomputed local linear OSGB→WGS84 approximation per tile (sub-cm over 400m) rather than full datum conversion at runtime. Also accept `--latlng` as input, and a share key printing a maps link to console.
 - **M3 — Ship.** Web page: postcode in, PK3 out; stretch goal in-browser play via wasm GZDoom.
 - **M4 — World mode baseline.** Hub-linked tile grid with edge transitions; tune out the screen wipe and **measure the travel hitch** on real tiles. This is the benchmark the fork must beat.
-- **M5 — Engine fork: streaming prototype.** Fork GZDoom (GPL — fork stays GPL, fine) and build `SeamlessTravel`: async-preload the neighbouring tile as the player approaches an edge, then swap maps preserving exact player state (position, velocity, view angles, inventory) with no wipe. Acceptance: walk across a tile boundary at full run with continuous velocity and no perceptible hitch. *(The original brief called this "the first streaming Doom source port". Struck for the same reason as the first-mover claim above — it is an unsearched superlative about a 30-year-old modding scene, and the forums where it would be refuted are the ones nothing can search. The acceptance test above is the real goal and does not need the adjective.)*
+- **M5 — Engine fork: streaming prototype.** Fork GZDoom (GPL — fork stays GPL, fine) and build `SeamlessTravel`: async-preload the neighbouring tile as the player approaches an edge, then swap maps preserving exact player state (position, velocity, view angles, inventory) with no wipe. Acceptance: walk across a tile boundary at full run with continuous velocity and no perceptible hitch. *(Originally "goal claim: the first streaming Doom source port" — dropped, unverified against the same unsearched forum corpus noted above.)*
 
 ## Pipeline architecture
 
