@@ -27,6 +27,7 @@ import pytest
 from postcode2wad import geometry as geometry_module
 from postcode2wad.build import build_tile
 from postcode2wad.sources import postcodes
+from postcode2wad.textures import BARRIER_TOPS
 
 CACHE = Path("cache")
 POSTCODE = "CT1 2EH"
@@ -142,6 +143,17 @@ def test_no_spires_between_ground_sectors(tile):
             continue
         sa, sb = tile.sectors[a], tile.sectors[b]
         if "floorplane_a" not in sa or "floorplane_a" not in sb:
+            continue
+        # A barrier top is not ground. It was excluded until 5 Aug only by the
+        # accident of barriers being *flat* sectors, so the moment they were
+        # sloped to sit properly on the ground the crowd of legitimate 1.8m
+        # hedge joins came back and buried the real number again — exactly what
+        # this docstring says was fixed once already. Excluded by name now,
+        # which is what the intent always was.
+        if (
+            sa.get("texturefloor") in BARRIER_TOPS
+            or sb.get("texturefloor") in BARRIER_TOPS
+        ):
             continue
         v1, v2 = tile.vertices[line["v1"]], tile.vertices[line["v2"]]
         for t in (0.0, 0.5, 1.0):

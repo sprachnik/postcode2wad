@@ -38,8 +38,14 @@ MARSH = "DMMARSH"
 BALLAST = "DMRAIL"
 #: The rail head itself — polished steel, drawn as its own thin sector.
 RAIL_HEAD = "DMRAILH"
-#: Seen from above, a clipped hedge is just dense foliage.
-HEDGE_TOP = WOODLAND
+#: Seen from above, a clipped hedge is just dense foliage, and a wall coping is
+#: concrete — but both get their own flat names so a barrier top can be told
+#: apart from ground wearing the same texture. See the note in art.py.
+HEDGE_TOP = "DMHEDGE"
+WALL_CAP = "DMWALLC"
+#: Every flat that means "the top of a barrier", for tests that must not count
+#: one as ground.
+BARRIER_TOPS = frozenset({HEDGE_TOP, WALL_CAP})
 
 ROOF = "CEIL5_2"  # still Freedoom's; you rarely see one from eye level
 

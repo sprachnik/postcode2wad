@@ -736,6 +736,22 @@ def build_tile(
             ]
             barrier_polygons.extend(parts)
             for part in parts:
+                # The top of the barrier, as a function of position: the
+                # ground under it plus its own height.
+                #
+                # A sloped sector takes its height from its fitted plane, not
+                # from `floor` — so sloping a barrier against the bare ground
+                # sampler pulls its top down to ground level and the fence
+                # vanishes. That is what happened when `sloped` was first added
+                # here: the rails survived it (they stand 2 units proud, so
+                # flush still reads) and every fence in the county disappeared.
+                # The offset has to be inside the sampler, not in `floor`.
+                barrier_top = (
+                    (lambda x, y, base=ground_at, off=shape.height_m * UNITS_PER_METRE:
+                        base(x, y) + off)
+                    if ground_at is not None
+                    else None
+                )
                 for piece, elevation_m in _split_by_bands(
                     part, bands, terrain_at, with_slopes
                 ):
@@ -743,10 +759,11 @@ def build_tile(
                         SectorSpec(
                             polygon=piece,
                             floor=round((elevation_m + shape.height_m) * UNITS_PER_METRE),
+                            height_at=barrier_top,
                             ceiling=sky_height,
                             floor_tex=textures.HEDGE_TOP
                             if wall == textures.HEDGE
-                            else textures.CONCRETE,
+                            else textures.WALL_CAP,
                             cover="barrier",
                             wall_tex=wall,
                             light=DAYLIGHT,

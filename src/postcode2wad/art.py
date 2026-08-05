@@ -224,6 +224,15 @@ GROUNDS = (
            stripes=(64, 0.14)),
     # The rail head: worn steel, near-uniform because it is polished by traffic.
     Ground("DMRAILH", (168, 170, 176), blotch=0.04, grain=0.05, cells=2),
+    # Barrier tops. Visually these are woodland and concrete — a clipped hedge
+    # from above is dense foliage, a wall coping is concrete — but they carry
+    # their own names so that a *barrier* can be told from *ground* wearing the
+    # same flat. The no-spires test needs that distinction: a hedge standing
+    # 1.8m proud of the grass beside it is correct and must not be counted as a
+    # ground-to-ground step, and it used to be excluded only by the accident of
+    # barriers being flat sectors.
+    Ground("DMHEDGE", (48, 66, 38), blotch=0.22, grain=0.10, cells=6),
+    Ground("DMWALLC", (158, 156, 150), blotch=0.06, grain=0.04, cells=3),
 )
 
 GROUND_BY_NAME = {ground.name: ground for ground in GROUNDS}
