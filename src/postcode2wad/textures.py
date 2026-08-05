@@ -144,7 +144,17 @@ FACADE_KEYS = {
     "garages": "G",
     "shed": "G",
     "hut": "G",
-    "greenhouse": "G",
+    "greenhouse": "H",
+    "glasshouse": "H",
+    "hotel": "G",
+    "apartments": "G",
+    "train_station": "G",
+    "university": "G",
+    "supermarket": "G",
+    "civic": "G",
+    "public": "G",
+    "sports_hall": "G",
+    "stadium": "G",
     "farm_auxiliary": "G",
     "barn": "G",
     "school": "R",
@@ -163,7 +173,22 @@ def building_storeys(height_m: float) -> int:
     return max(1, min(MAX_STOREYS, round(height_m / STOREY_M)))
 
 
-def building_facade(tags: dict[str, str], osm_id: int, height_m: float) -> tuple[str, float]:
+#: Footprint above which an untagged building is not a house, in m².
+#:
+#: `building=yes` is the second largest category by area on a Sevenoaks column —
+#: 9,478 m² across 41 buildings — and it carries no clue about what it is. Most
+#: are houses and should stay houses, but a few are sheds and units that someone
+#: never tagged, and giving those sash windows and a front door is exactly the
+#: complaint that started this. Size is the signal already in hand: a detached
+#: house is ~100 m² and a semi half that, so anything four times a large house
+#: is not one. Deliberately generous — a wrong industrial façade on a big house
+#: is worse than a domestic one on a small unit, so the threshold errs high.
+BIG_FOOTPRINT_M2 = 400.0
+
+
+def building_facade(
+    tags: dict[str, str], osm_id: int, height_m: float, footprint_m2: float = 0.0
+) -> tuple[str, float]:
     """The façade texture for a building, and the scaley that fits it to the wall.
 
     The texture is drawn to cover the whole wall exactly once, top to bottom, so
@@ -176,6 +201,8 @@ def building_facade(tags: dict[str, str], osm_id: int, height_m: float) -> tuple
     if key is None:
         if tags.get("amenity") == "place_of_worship" or tags.get("historic"):
             key = "S"
+        elif kind in ("yes", "") and footprint_m2 >= BIG_FOOTPRINT_M2:
+            key = "G"  # untagged and far too big to be a house — see above
         else:
             key = DOMESTIC_FACADES[osm_id % len(DOMESTIC_FACADES)]
 

@@ -173,10 +173,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--year", default="2022")
     parser.add_argument("--res", default="1", help="resolution in metres")
     parser.add_argument("--dir", default=str(DEFAULT_LIDAR_DIR), metavar="DIR")
-    # 3, not 4. Measured 5 Aug on the same 30 squares: 4 workers got 0 and 3
-    # got 28. The endpoint throttles somewhere between the two and says so with
-    # a 404, so a higher default does not go faster — it goes nowhere.
-    parser.add_argument("--workers", type=int, default=3)
+    # 1. The throttle is on sustained *rate*, not just concurrency, which took
+    # two measurements to see. 4 workers got 0 of 30. 3 workers got 28 of 30 —
+    # and then 0 of 91 when the run was long enough to accumulate. A single
+    # request for one of those "failed" squares returned 200 and 60.7 MB
+    # immediately afterwards, so nothing was missing and nothing was broken.
+    #
+    # Retries make it worse, not better: four attempts across ninety tiles is
+    # ~360 requests that keep the limiter engaged. A mirror of 195 squares is
+    # therefore a serial job measured in hours, and pretending otherwise just
+    # produces a half-mirror and a slow build later.
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 

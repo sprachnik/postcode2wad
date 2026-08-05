@@ -334,6 +334,7 @@ def _road_surface(line, ground_at, limit: float = ROAD_LIFT_LIMIT):
     the road makes is bounded: against the ground beside it by `limit`, and
     against a different way's surface by twice `limit`, since both are anchored
     to the same ground where they meet.
+
     """
     step = ROAD_PROFILE_STEP_M * UNITS_PER_METRE
     count = max(2, int(line.length / step) + 1)
@@ -656,7 +657,12 @@ def build_tile(
         # The façade covers the wall exactly once, so scaley depends on the
         # building's measured height. scalex stays 1: the texture is authored at
         # 32 px/m horizontally, which is already map scale.
-        wall, scale_y = textures.building_facade(shape.tags, shape.osm_id, height_m)
+        # Footprint in m², so an untagged building too big to be a house does
+        # not get sash windows and a front door. Polygon is in map units.
+        footprint_m2 = shape.polygon.area / (UNITS_PER_METRE * UNITS_PER_METRE)
+        wall, scale_y = textures.building_facade(
+            shape.tags, shape.osm_id, height_m, footprint_m2
+        )
         specs.append(
             SectorSpec(
                 polygon=shape.polygon,

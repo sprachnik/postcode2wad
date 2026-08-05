@@ -344,6 +344,16 @@ class Facade:
     courses: tuple[float, float] | None = (0.215, 0.075)
     #: Per-unit tone scatter. Stock brick is far more varied than machine brick.
     scatter: float = 0.10
+    #: What gets *drawn* on the wall, which turns out to matter more than its
+    #: colour. Every façade used to be domestic: sash windows in bays and a
+    #: front door one bay in from the left, on grey blockwork as readily as on
+    #: brick. A distribution shed and a 90,000 m² glasshouse both came out
+    #: looking like a terrace that had been painted grey.
+    #:
+    #:   domestic    sash windows per bay, a front door, eaves
+    #:   industrial  continuous glazing band high on the wall, roller shutter
+    #:   glass       mostly glazing with structural mullions
+    style: str = "domestic"
 
 
 FACADES = (
@@ -351,7 +361,20 @@ FACADES = (
     Facade("Y", (178, 160, 124), (198, 192, 180), (238, 238, 234), scatter=0.10),
     Facade("N", (220, 216, 206), (220, 216, 206), (96, 96, 100), courses=None, scatter=0.03),
     Facade("S", (156, 150, 136), (176, 172, 160), (86, 84, 80), courses=(0.45, 0.22), scatter=0.10),
-    Facade("G", (138, 138, 136), (168, 168, 164), (78, 78, 80), scatter=0.06),
+    # Profiled steel cladding, not blockwork: wide flat courses, almost no tone
+    # scatter, because a clad shed is machine-made and uniform in a way brick
+    # never is.
+    Facade(
+        "G", (138, 138, 136), (168, 168, 164), (78, 78, 80),
+        courses=(1.0, 0.02), scatter=0.03, style="industrial",
+    ),
+    # Glasshouse. Thanet Earth is ~90 hectares of this and is one of the largest
+    # structures in Kent; rendering it as a grey terrace with front doors was
+    # the report that prompted all of this.
+    Facade(
+        "H", (168, 194, 200), (196, 214, 218), (150, 160, 164),
+        courses=None, scatter=0.02, style="glass",
+    ),
 )
 FACADE_BY_KEY = {facade.key: facade for facade in FACADES}
 
@@ -373,6 +396,13 @@ def facade_png(facade: Facade, storeys: int, seed: int = 1) -> bytes:
 
     rgb = _masonry(rng, facade, h, w, px_per_m_x, px_per_m_y)
 
+    if facade.style == "glass":
+        _glasshouse(rgb, facade, h, w, px_per_m_x, px_per_m_y)
+        return _encode(rgb)
+    if facade.style == "industrial":
+        _industrial(rgb, facade, rng, h, w, storeys, px_per_m_x, px_per_m_y)
+        return _encode(rgb)
+
     bay = w // BAYS
     for storey in range(storeys):
         # Storey 0 is the top of the texture, which is the top of the building.
@@ -388,6 +418,55 @@ def facade_png(facade: Facade, storeys: int, seed: int = 1) -> bytes:
 
     _eaves(rgb, facade, px_per_m_y)
     return _encode(rgb)
+
+
+def _industrial(rgb, facade: Facade, rng, h: int, w: int, storeys: int,
+                px_x: float, px_y: float) -> None:
+    """A clad shed: one continuous glazing band high up, and a roller shutter.
+
+    Sheds are not storeyed the way a house is — the wall is one volume with a
+    strip of daylight near the eaves and a vehicle door at the bottom. Drawing
+    them per-storey with sash windows is what made a distribution warehouse read
+    as a very large terrace.
+    """
+    band_top = int(0.18 * h)
+    band_bottom = band_top + max(2, int(1.1 * px_y))
+    rgb[band_top:band_bottom, :] = _GLASS
+    # Mullions at ~3m, which is what holds a glazing band up.
+    for x in range(0, w, max(4, int(3.0 * px_x))):
+        rgb[band_top:band_bottom, x:x + max(1, int(0.12 * px_x))] = facade.trim
+    # A lighter run along the top of the band, so it reads as glass catching the
+    # sky rather than as a painted stripe.
+    rgb[band_top:band_top + max(1, int(0.2 * px_y))] = _GLASS_SKY
+
+    # Roller shutter, ground level, roughly 4m wide and 4.5m tall.
+    door_w = max(6, int(4.0 * px_x))
+    door_h = max(8, int(4.5 * px_y))
+    left = (w - door_w) // 2
+    top = h - door_h
+    rgb[top:h, left:left + door_w] = facade.trim
+    # Horizontal slats.
+    for y in range(top, h, max(2, int(0.25 * px_y))):
+        rgb[y:y + 1, left:left + door_w] = facade.mortar
+
+
+def _glasshouse(rgb, facade: Facade, h: int, w: int, px_x: float, px_y: float) -> None:
+    """Mostly glass on a light frame — a commercial greenhouse.
+
+    No storeys, no doors: from outside, a glasshouse is a grid of panes on
+    mullions, and its whole character is that you can see the sky through it.
+    """
+    rgb[:, :] = _GLASS_SKY
+    pane_x = max(3, int(1.2 * px_x))
+    pane_y = max(3, int(1.2 * px_y))
+    frame = max(1, int(0.08 * px_x))
+    for x in range(0, w, pane_x):
+        rgb[:, x:x + frame] = facade.trim
+    for y in range(0, h, pane_y):
+        rgb[y:y + frame, :] = facade.trim
+    # A darker band at the foot: the dwarf wall a glasshouse actually sits on.
+    foot = max(2, int(0.8 * px_y))
+    rgb[h - foot:h, :] = facade.brick
 
 
 def _masonry(rng, facade: Facade, h: int, w: int, px_x: float, px_y: float) -> np.ndarray:
