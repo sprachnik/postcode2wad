@@ -98,6 +98,46 @@ PRECOMPRESS = ["uzdoom.data", IWAD]
 BROTLI_QUALITY = 11
 
 
+def world_total(site: Path, districts: list[dict]) -> tuple[int, float]:
+    """How much ground exists, everywhere, counting each square once.
+
+    Deduplicated across districts because they *share their border tiles*. A
+    district's tiles are the grid squares intersecting its ONS polygon, so a
+    square straddling a boundary is in both plans and gets generated twice.
+    Measured on the Kent artifacts mid-build: 4,061 artifacts for 3,774 unique
+    tiles — 287 extra builds across 278 tiles, 9 of which sit in three
+    districts at once. Summing the per-district areas claimed ~184 km² of Kent
+    twice, and the error grows with total boundary length.
+
+    The per-district figures stay as they are and are right: Sevenoaks does
+    contain its border tiles, and a player downloading Sevenoaks gets them.
+    It is only the *total* that is a claim about how much of Britain exists,
+    and that one must not count the same ground twice.
+
+    Area comes from each district's own `size_m` rather than one shared
+    constant, so a district built at a different tile size still contributes
+    its real area. Tile ids embed their size (`bng800-...`), so tiles of two
+    sizes never collide in the set even where they cover the same ground —
+    which is correct: they are different maps.
+    """
+    area_by_id: dict[str, float] = {}
+    for entry in districts:
+        manifest_path = site / entry["slug"] / "manifest.json"
+        if not manifest_path.exists():
+            # A district on the listing with no manifest is one built by an
+            # older run. Count it at its recorded size rather than dropping it
+            # silently — under-reporting is as wrong as double-counting, and
+            # the synthetic keys cannot collide with a real tile id.
+            for n in range(entry["tiles"]):
+                area_by_id[f"{entry['slug']}#{n}"] = entry["area_km2"] / max(entry["tiles"], 1)
+            continue
+        manifest = json.loads(manifest_path.read_text())
+        per_tile = manifest.get("size_m", 800) ** 2 / 1e6
+        for tile in manifest["tiles"]:
+            area_by_id[tile["id"]] = per_tile
+    return len(area_by_id), round(sum(area_by_id.values()), 2)
+
+
 def build_tile_pk3(artifact: Path, out: Path) -> dict | None:
     """One standalone PK3 from one district artifact. Returns its manifest row."""
     from postcode2wad.hud import HANDLER, ZSCRIPT_LUMP, build_zscript, minimap_lump
@@ -320,32 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     # intersect its ONS polygon, so they overhang its edges: Thanet is a 103 km²
     # district and its 200 tiles are 128 km² of map. The playable world is the
     # bigger number; the place it depicts is the smaller one. Say which you mean.
-    # Deduplicated across districts, because they share their border tiles.
-    #
-    # A district's tiles are the grid squares intersecting its ONS polygon, and
-    # a square straddling two districts is in both plans and gets generated
-    # twice. Measured mid-build on Kent: 4,032 artifacts for 3,744 unique tiles,
-    # so ~7% of the county is built twice and summing the per-district figures
-    # overstates the total by the same 7% — about 300 km² over a county.
-    #
-    # The per-district numbers stay as they are: Sevenoaks genuinely does
-    # contain those tiles, and a player downloading it genuinely gets them. It
-    # is only the *total* that must not count the same ground twice, because
-    # that one is a claim about how much of Britain exists.
-    unique: set[str] = set()
-    for entry in listing["districts"]:
-        manifest_path = out / entry["slug"] / "manifest.json"
-        if not manifest_path.exists():
-            # No manifest means a district built by an older run; fall back to
-            # its own count rather than dropping it silently.
-            unique.update(f"{entry['slug']}#{n}" for n in range(entry["tiles"]))
-            continue
-        for tile in json.loads(manifest_path.read_text())["tiles"]:
-            unique.add(tile["id"])
-
-    per_tile_km2 = manifest["size_m"] ** 2 / 1e6
-    listing["total_km2"] = round(len(unique) * per_tile_km2, 2)
-    listing["tiles_total"] = len(unique)
+    listing["tiles_total"], listing["total_km2"] = world_total(out, listing["districts"])
     listing["tiles_with_overlap"] = sum(d["tiles"] for d in listing["districts"])
     dj_path.write_text(json.dumps(listing, indent=1), encoding="utf-8")
 

@@ -742,9 +742,19 @@ pcInput.addEventListener('keydown', ev => { if (ev.key === 'Enter') findPostcode
 
 fetch('districts.json').then(r => r.json()).then(async listing => {
   districts = await Promise.all(listing.districts.map(loadDistrict));
-  const total = districts.reduce((n, d) => n + d.byPos.size, 0);
+  // Counted once each, not summed per district. Districts share their border
+  // tiles — a grid square straddling a boundary is in both manifests, because
+  // it genuinely is in both districts and either download contains it. Summing
+  // `byPos.size` therefore counts that square twice: 287 of them across Kent.
+  // Keyed by size too, so tiles of different sizes over the same ground stay
+  // distinct — they are different maps.
+  const seen = new Map();   // "size:ix,iy" -> km² of that one square
+  for (const d of districts) {
+    for (const key of d.byPos.keys()) seen.set(d.size_m + ':' + key, d.size_m ** 2 / 1e6);
+  }
+  const total = seen.size;
   sub.textContent = districts.map(d => d.name).join(', ')
-    + ' — ' + total + ' playable square' + (total === 1 ? '' : 's');
+    + ' — ' + total.toLocaleString() + ' playable square' + (total === 1 ? '' : 's');
 
   // The headline area comes from districts.json, which build-webdemo.py
   // computes — never from a number typed into this page, which would start
@@ -760,10 +770,12 @@ fetch('districts.json').then(r => r.json()).then(async listing => {
   // order, which is exactly how this shipped once — the headline live and the
   // figure not, rendering as a bare em-dash. So fall back to computing it from
   // the manifests, which are already loaded because the map needs them and
-  // which carry the same two numbers. Same arithmetic as build-webdemo.py:
-  // tiles built times tile area.
+  // which carry the same two numbers. Same arithmetic as build-webdemo.py's
+  // `world_total`: distinct squares times tile area. The fallback has to
+  // dedupe for the same reason the builder does — it once did not, and would
+  // have quietly disagreed with the server's figure by ~7% whenever it fired.
   const km2 = listing.total_km2
-    || districts.reduce((a, d) => a + d.byPos.size * d.size_m ** 2 / 1e6, 0);
+    || [...seen.values()].reduce((a, b) => a + b, 0);
   const tiles = listing.tiles_total || total;
 
   const headline = document.querySelector('.headline');

@@ -166,3 +166,109 @@ def DIR_CODE(launcher: str) -> dict:
         m.group(1): int(m.group(2))
         for m in re.finditer(r"(\w+):\s*(\d+)", src)
     }
+
+
+# --- the headline area figure -------------------------------------------------
+#
+# Separate concern from the seam above, and here for the same reason: it is a
+# number nothing else checks, published as a claim about how much of Britain
+# exists, and wrong in a direction that flatters.
+
+def world_total():
+    """`build-webdemo.py` is a script with a hyphen in its name, so import it."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "build-webdemo.py"
+    spec = importlib.util.spec_from_file_location("build_webdemo", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.world_total
+
+
+def write_site(tmp_path, districts: dict[str, list[str]], size_m: int = 800):
+    """A site tree with one manifest per district. Returns the listing rows."""
+    import json
+
+    rows = []
+    for slug, ids in districts.items():
+        ddir = tmp_path / slug
+        ddir.mkdir()
+        (ddir / "manifest.json").write_text(
+            json.dumps({"size_m": size_m, "tiles": [{"id": i} for i in ids]})
+        )
+        rows.append(
+            {
+                "slug": slug,
+                "name": slug.title(),
+                "tiles": len(ids),
+                "area_km2": round(len(ids) * size_m**2 / 1e6, 2),
+            }
+        )
+    return rows
+
+
+def test_a_tile_two_districts_share_is_counted_once(tmp_path):
+    """The defect this exists for, at the scale it was found.
+
+    Sevenoaks and Tonbridge and Malling share 51 tiles in the real Kent build,
+    Canterbury and Dover 46. Summing the per-district figures counted every one
+    of them twice -- ~184 km2 of Kent claimed twice across the county, growing
+    with total boundary length as more districts land.
+    """
+    rows = write_site(
+        tmp_path,
+        {
+            "sevenoaks": ["bng800-1-1", "bng800-2-1", "bng800-3-1"],
+            "tonbridge": ["bng800-3-1", "bng800-4-1"],  # bng800-3-1 is the shared one
+        },
+    )
+    tiles, km2 = world_total()(tmp_path, rows)
+
+    assert tiles == 4, "the shared tile was counted twice"
+    assert km2 == pytest.approx(4 * 0.64)
+    # And the naive sum it replaced would have said five.
+    assert sum(r["tiles"] for r in rows) == 5
+
+
+def test_a_tile_in_three_districts_is_still_counted_once(tmp_path):
+    """Nine real Kent tiles sit in three districts, so pairwise logic is not enough."""
+    rows = write_site(
+        tmp_path,
+        {"a": ["bng800-9-9"], "b": ["bng800-9-9"], "c": ["bng800-9-9"]},
+    )
+    assert world_total()(tmp_path, rows) == (1, pytest.approx(0.64))
+
+
+def test_districts_that_do_not_touch_are_unaffected(tmp_path):
+    """Sevenoaks and Thanet are at opposite ends of Kent and share nothing.
+
+    Pinned because it is the state the site was in when the fix landed: if the
+    dedup ever starts *removing* ground, this is where it shows up first.
+    """
+    rows = write_site(
+        tmp_path, {"sevenoaks": ["bng800-1-1", "bng800-2-1"], "thanet": ["bng800-90-90"]}
+    )
+    assert world_total()(tmp_path, rows) == (3, pytest.approx(3 * 0.64))
+
+
+def test_area_follows_each_districts_own_tile_size(tmp_path):
+    """One shared `size_m` would misprice every district not built at that size.
+
+    The first version of this took the tile size from whichever district was
+    being rebuilt and applied it to all of them -- fine while everything is
+    800m, silently wrong on the first district that is not.
+    """
+    rows = write_site(tmp_path, {"small": ["bng800-1-1"]}, size_m=800)
+    rows += write_site(tmp_path, {"big": ["bng1600-1-1"]}, size_m=1600)
+    tiles, km2 = world_total()(tmp_path, rows)
+    assert tiles == 2
+    assert km2 == pytest.approx(0.64 + 2.56)
+
+
+def test_a_district_with_no_manifest_still_counts(tmp_path):
+    """Older runs left no manifest. Dropping them under-reports, which is equally wrong."""
+    rows = write_site(tmp_path, {"new": ["bng800-1-1"]})
+    rows.append({"slug": "old", "name": "Old", "tiles": 10, "area_km2": 6.4})
+    tiles, km2 = world_total()(tmp_path, rows)
+    assert tiles == 11
+    assert km2 == pytest.approx(0.64 + 6.4)
