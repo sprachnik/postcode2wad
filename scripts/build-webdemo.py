@@ -320,8 +320,33 @@ def main(argv: list[str] | None = None) -> int:
     # intersect its ONS polygon, so they overhang its edges: Thanet is a 103 km²
     # district and its 200 tiles are 128 km² of map. The playable world is the
     # bigger number; the place it depicts is the smaller one. Say which you mean.
-    listing["total_km2"] = round(sum(d["area_km2"] for d in listing["districts"]), 2)
-    listing["tiles_total"] = sum(d["tiles"] for d in listing["districts"])
+    # Deduplicated across districts, because they share their border tiles.
+    #
+    # A district's tiles are the grid squares intersecting its ONS polygon, and
+    # a square straddling two districts is in both plans and gets generated
+    # twice. Measured mid-build on Kent: 4,032 artifacts for 3,744 unique tiles,
+    # so ~7% of the county is built twice and summing the per-district figures
+    # overstates the total by the same 7% — about 300 km² over a county.
+    #
+    # The per-district numbers stay as they are: Sevenoaks genuinely does
+    # contain those tiles, and a player downloading it genuinely gets them. It
+    # is only the *total* that must not count the same ground twice, because
+    # that one is a claim about how much of Britain exists.
+    unique: set[str] = set()
+    for entry in listing["districts"]:
+        manifest_path = out / entry["slug"] / "manifest.json"
+        if not manifest_path.exists():
+            # No manifest means a district built by an older run; fall back to
+            # its own count rather than dropping it silently.
+            unique.update(f"{entry['slug']}#{n}" for n in range(entry["tiles"]))
+            continue
+        for tile in json.loads(manifest_path.read_text())["tiles"]:
+            unique.add(tile["id"])
+
+    per_tile_km2 = manifest["size_m"] ** 2 / 1e6
+    listing["total_km2"] = round(len(unique) * per_tile_km2, 2)
+    listing["tiles_total"] = len(unique)
+    listing["tiles_with_overlap"] = sum(d["tiles"] for d in listing["districts"])
     dj_path.write_text(json.dumps(listing, indent=1), encoding="utf-8")
 
     # `--engine-dir site/engine` is the obvious thing to type on a rebuild --
