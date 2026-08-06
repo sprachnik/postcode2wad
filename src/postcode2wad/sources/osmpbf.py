@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import array
 import json
+import mmap
 import pickle
 import re
 import shutil
@@ -307,7 +308,8 @@ class _Index:
     bboxes: np.ndarray  # (n, 4) int32: min x, min y, max x, max y
     offsets: np.ndarray  # (n + 1,) uint64
     cells: dict[tuple[int, int], array.array]
-    records: bytes
+    records: object  # bytes or mmap; both support unpack_from/frombuffer/slice
+    handle: object | None = None  # kept open: closing it invalidates the mmap
 
     def candidates(self, west: int, south: int, east: int, north: int) -> np.ndarray:
         """Ways whose bounding box meets the query, cheapest test first."""
@@ -351,10 +353,25 @@ def _load(directory: str) -> _Index:
     bboxes = np.fromfile(path / "bbox.bin", dtype=np.int32).reshape(-1, 4)
     offsets = np.fromfile(path / "offsets.bin", dtype=np.uint64)
     cells = pickle.loads((path / "cells.bin").read_bytes())
-    # Read whole rather than mmapped: 120 MB for Kent, and a county build hits
-    # it 5,800 times. Held by lru_cache so a bulk run pays for it once.
-    records = (path / "records.bin").read_bytes()
-    return _Index(path, meta, bboxes, offsets, cells, records)
+    # Memory-mapped rather than read whole.
+    #
+    # It was read whole, and the reasoning held for Kent: 120 MB, hit 5,800
+    # times in a county build, and lru_cache means a bulk run pays once. It does
+    # not hold for England, whose records.bin is 4.12 GB. Two things break at
+    # that size — Windows refuses a single read() that large and raises
+    # OSError 22, which is how this was found (a Dartford tile died on it), and
+    # eight worker processes each allocating 4 GB would want 33 GB of RAM even
+    # if the read succeeded.
+    #
+    # mmap fixes both: pages are faulted in on demand and shared through the OS
+    # page cache rather than copied per process, so eight workers cost roughly
+    # what one does. unpack_from, np.frombuffer and slicing all read straight
+    # off the map, so nothing downstream changes.
+    #
+    # The handle is kept on the index because closing it invalidates the map.
+    handle = open(path / "records.bin", "rb")  # noqa: SIM115 — lifetime is the index's
+    records = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+    return _Index(path, meta, bboxes, offsets, cells, records, handle)
 
 
 def open_index(
