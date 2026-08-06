@@ -89,21 +89,21 @@ def district_tiles(name: str) -> list[str]:
 
 #: Attempts per tile, and the base for exponential backoff between them.
 #:
-#: Every one of these paths was a *transient* failure observed on 5 Aug while
-#: mirroring 30 squares, and every one was reported as permanent:
+#: Two of these were real transient failures, seen while mirroring Kent:
 #:
-#:   - At 4 workers the API returned 404 for all 30 tiles in six seconds. At 3
-#:     it served 28, and the remaining 2 came back on a single-worker retry.
-#:     Nothing was missing; the endpoint was throttling and 404 is how it says
-#:     so. `docs/lidar-bulk.md` had already probed all 191 Kent squares and
-#:     found 191/191 present, and that finding stands.
-#:   - One tile arrived as a 0.6 MB unreadable zip and retried clean at 41.6 MB.
-#:   - One run died outright on a ChunkedEncodingError mid-download.
+#:   - one tile arrived as a 0.6 MB unreadable zip and retried clean at 41.6 MB;
+#:   - one run died outright on a ChunkedEncodingError mid-download, losing
+#:     every remaining tile rather than one.
 #:
-#: Reported as MISSING/BAD ZIP/traceback, those three produce a half-mirror
-#: that looks like a coverage report. Every build timed against it is then
-#: silently network-bound, which is the exact failure this project keeps
-#: paying for. Over 191 squares it is a certainty rather than a risk.
+#: Reported as BAD ZIP and a traceback, those produce a half-mirror that reads
+#: as a coverage report, and every build timed against it is then silently
+#: network-bound — the exact failure this project keeps paying for.
+#:
+#: A third was believed to be throttling and was not: a run of 404s that looked
+#: like rate limiting turned out to be a carriage return in the tile list, so
+#: the ids never matched anything. 404 is retried anyway, because the cost is a
+#: few seconds and the alternative is recording a square as missing when it is
+#: not — but do not read the retry as evidence the API throttles.
 ATTEMPTS = 4
 BACKOFF_S = 5.0
 
@@ -173,16 +173,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--year", default="2022")
     parser.add_argument("--res", default="1", help="resolution in metres")
     parser.add_argument("--dir", default=str(DEFAULT_LIDAR_DIR), metavar="DIR")
-    # 1. The throttle is on sustained *rate*, not just concurrency, which took
-    # two measurements to see. 4 workers got 0 of 30. 3 workers got 28 of 30 —
-    # and then 0 of 91 when the run was long enough to accumulate. A single
-    # request for one of those "failed" squares returned 200 and 60.7 MB
-    # immediately afterwards, so nothing was missing and nothing was broken.
+    # 1 is cautious rather than measured, and the story behind it is a warning.
     #
-    # Retries make it worse, not better: four attempts across ninety tiles is
-    # ~360 requests that keep the limiter engaged. A mirror of 195 squares is
-    # therefore a serial job measured in hours, and pretending otherwise just
-    # produces a half-mirror and a slow build later.
+    # A day was spent concluding the API throttles on sustained rate: 4 workers
+    # got 0 of 30, 3 got 28 of 30, 1 got the rest. That looks like a textbook
+    # limiter and it was entirely coincidence. The real fault was a carriage
+    # return in the tile-list file feeding the runs, so every id arrived with a
+    # trailing CR: it matches nothing on disk, and the request goes to
+    # .../TQ4035%0D, which the API correctly 404s. The runs that appeared to
+    # prove low concurrency worked were the ones typed by hand.
+    #
+    # With that fixed, 195 DTM and 195 DSM squares came down at 1 worker with
+    # zero failures, ~10s and ~30s each. Whether 3 or 4 also works is untested.
+    #
+    # The retries below are still earned: a truncated zip and a mid-download
+    # ChunkedEncodingError were both real, and both were reported as permanent.
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
