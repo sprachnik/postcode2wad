@@ -251,6 +251,17 @@ def build_all(tiles: list[Tile], work: Path, cache_dir: Path, options: dict, wor
     progress_log = work / "progress.jsonl"
     failure_log = work / "failures.jsonl"
 
+    # Retire the previous run's failure log rather than appending to it.
+    #
+    # It is the first thing anyone reads to ask "is this run going wrong", and
+    # append-only makes that question unanswerable: a reused work dir showed 218
+    # failures against 34 tiles built, all of them from a run the day before,
+    # which reads exactly like a build falling over. Kept as .prev rather than
+    # deleted, because the reason a tile failed last time is often why it fails
+    # again.
+    if failure_log.exists():
+        failure_log.replace(work / "failures.prev.jsonl")
+
     todo = [t for t in tiles if read_meta(work / "tiles" / f"{t.id}.zip") is None]
     done = len(tiles) - len(todo)
     if done:
