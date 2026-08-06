@@ -374,12 +374,22 @@ def _road_surface(line, ground_at, limit: float = ROAD_LIFT_LIMIT, spans: bool =
     ]
     if spans:
         # A bridge does not follow the ground; that is what makes it a bridge.
-        # Straight from end to end, because the ends are where a deck actually
-        # meets the earth and everything between them is the thing being
-        # crossed. The clamp below is turned off with it — clamping a deck to
-        # within `limit` of the riverbed is exactly the dip being fixed.
-        first, last = heights[0], heights[-1]
-        heights = [first + (last - first) * (i / (count - 1)) for i in range(count)]
+        # Level, at the higher of its two ends, and the clamp turned off —
+        # clamping a deck to within 31cm of the riverbed is the dip being fixed.
+        #
+        # Level rather than a straight line between the ends, which is what this
+        # did first. The ends are sampled on the *ground*, and an endpoint
+        # sitting on the embankment slope instead of the abutment top reads low
+        # and tilts the whole deck. Measured on Swanley: two motorway spans of
+        # 33m and 34m came out at 1 in 11, a 9% grade on a motorway. Taking the
+        # higher end makes every deck flat and guarantees it clears what it
+        # crosses.
+        #
+        # The cost is a long viaduct on a real gradient, which would come out
+        # level and step at one end. Every span here is 25-76m, where level is
+        # right; revisit if a genuinely graded structure turns up.
+        deck = max(heights[0], heights[-1])
+        heights = [deck] * count
         limit = float("inf")
     else:
         heights = _straighten(
