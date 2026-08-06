@@ -39,3 +39,10 @@ desktop.ini
 
 # Stray HTML dumps from research tooling
 dl.html
+
+# Generated tile lists. Deliberately not tracked: git normalises these to
+# CRLF on Windows checkout, and a trailing carriage return on every id cost a
+# day of debugging once already — the ids stop matching anything on disk and
+# the API 404s a URL ending %0D.
+kent-squares.txt
+*-squares.txt
