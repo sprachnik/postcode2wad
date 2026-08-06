@@ -49,6 +49,12 @@ BARRIER_TOPS = frozenset({HEDGE_TOP, WALL_CAP})
 
 ROOF = "CEIL5_2"  # still Freedoom's; you rarely see one from eye level
 
+#: Everything that legitimately stands above the ground beside it. A spire
+#: check that counts these finds thousands of correct answers and hides the
+#: wrong ones — which the smoke test's docstring records happening once with
+#: hedges alone.
+STANDS_PROUD = frozenset({HEDGE_TOP, WALL_CAP, ROOF, "DMBRIDG"})
+
 # Wall textures (TEXTURE1) — legal in texturemiddle/texturetop/texturebottom.
 BRICK = "BRICK1"  # tan/brown brick
 BRICK_GREY = "A-BRICK1"
@@ -69,6 +75,11 @@ KERB = "STONE2"
 TERRAIN_SIDE = GRASS
 #: Water's edge is a genuine cut bank, so it keeps an earth face.
 BANK = "A-MUD"
+#: The face of a bridge deck, and therefore the wall a road ends at where one
+#: crosses it. Dark, so the dead end reads as an underpass mouth.
+BRIDGE_FACE = "BRICK5"
+#: The deck surface. Tarmac to the eye; distinct to a test.
+BRIDGE_DECK = "DMBRIDG"
 
 #: Land-cover category per ground flat, for measuring what a tile is made of.
 #:

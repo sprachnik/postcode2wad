@@ -224,6 +224,10 @@ GROUNDS = (
            stripes=(64, 0.14)),
     # The rail head: worn steel, near-uniform because it is polished by traffic.
     Ground("DMRAILH", (168, 170, 176), blotch=0.04, grain=0.05, cells=2),
+    # A bridge deck. Tarmac to look at, but named so that a deck edge — which
+    # is *meant* to stand clear of the ground it spans — can be told from a
+    # spire, which is not. Same reason the barrier tops carry their own names.
+    Ground("DMBRIDG", (62, 62, 66), blotch=0.07, grain=0.06, cells=3),
     # Barrier tops. Visually these are woodland and concrete — a clipped hedge
     # from above is dense foliage, a wall coping is concrete — but they carry
     # their own names so that a *barrier* can be told from *ground* wearing the

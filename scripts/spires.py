@@ -44,7 +44,7 @@ UNITS_PER_METRE = 32.0
 #: building and a hedge top is a hedge; counting either as a spire buries the
 #: real ones under thousands of correct ones, which is the mistake the smoke
 #: test's own docstring records making once already.
-EXPECTED_HIGH = {"CEIL5_2", "DMHEDGT", "DMWALLC"}
+EXPECTED_HIGH = {"CEIL5_2", "DMHEDGT", "DMWALLC", "DMBRIDG"}
 
 
 def textmap(archive: zipfile.ZipFile, name: str) -> str:

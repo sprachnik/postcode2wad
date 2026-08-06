@@ -342,7 +342,7 @@ def _straighten(values: list[float], radius: int) -> list[float]:
     return out
 
 
-def _road_surface(line, ground_at, limit: float = ROAD_LIFT_LIMIT):
+def _road_surface(line, ground_at, limit: float = ROAD_LIFT_LIMIT, spans: bool = False):
     """A road's height as a function of distance along its own centreline.
 
     A carriageway is an engineered surface: level across its width, smoothly
@@ -372,7 +372,19 @@ def _road_surface(line, ground_at, limit: float = ROAD_LIFT_LIMIT):
     heights = [
         ground_at(*line.interpolate(step * i).coords[0]) for i in range(count)
     ]
-    heights = _straighten(heights, max(1, round(ROAD_PROFILE_SMOOTH_M * UNITS_PER_METRE / step)))
+    if spans:
+        # A bridge does not follow the ground; that is what makes it a bridge.
+        # Straight from end to end, because the ends are where a deck actually
+        # meets the earth and everything between them is the thing being
+        # crossed. The clamp below is turned off with it — clamping a deck to
+        # within `limit` of the riverbed is exactly the dip being fixed.
+        first, last = heights[0], heights[-1]
+        heights = [first + (last - first) * (i / (count - 1)) for i in range(count)]
+        limit = float("inf")
+    else:
+        heights = _straighten(
+            heights, max(1, round(ROAD_PROFILE_SMOOTH_M * UNITS_PER_METRE / step))
+        )
 
     cache: dict[tuple[int, int], float] = {}
 
@@ -596,8 +608,28 @@ def build_tile(
     barrier_polygons: list[Polygon] = []
 
     if with_roads:
-        for shape in roads_to_shapes(features.roads, tile):
+        # Bridges last, so `build_geometry`'s last-wins resolution hands the
+        # crossing to the deck rather than to the road underneath.
+        #
+        # A Doom sector has one floor height per point, so where a flyover
+        # crosses a road *something* has to give. Left alone the deck was
+        # dragged down into the road it spans and the result was a dip in the
+        # motorway — reported from play as "bridges render as dips". Choosing
+        # which way loses is the only move available, and the deck is the right
+        # winner: it is the surface you are usually driving on, and the road
+        # beneath ending at a dark opening reads as an underpass, while a
+        # motorway sagging into a cutting reads as broken.
+        #
+        # This does not make the lower road passable. Nothing here can — that
+        # needs GZDoom 3D floors, see TODO.md. It makes the geometry honest
+        # about which way is on top.
+        road_shapes = sorted(
+            roads_to_shapes(features.roads, tile),
+            key=lambda s: s.tags.get("bridge", "no") not in ("no", ""),
+        )
+        for shape in road_shapes:
             paved = shape.tags.get("highway", "") in PAVED_FOOTWAYS
+            spanning = shape.tags.get("bridge", "no") not in ("no", "")
             walkable_polygons.append(shape.polygon)
             if not paved:
                 road_polygons.append(shape.polygon)
@@ -606,7 +638,7 @@ def build_tile(
             # piece of one way shares the profile, so pieces split apart by the
             # tile edge or by a junction still meet each other exactly.
             surface = (
-                _road_surface(shape.centre, ground_at)
+                _road_surface(shape.centre, ground_at, spans=spanning)
                 if ground_at is not None and shape.centre is not None
                 else None
             )
@@ -621,9 +653,16 @@ def build_tile(
                         polygon=piece,
                         floor=floor if paved else floor - KERB_UNITS,
                         ceiling=sky_height,
-                        floor_tex=textures.PAVEMENT if paved else textures.ROAD,
+                        floor_tex=textures.BRIDGE_DECK
+                        if spanning
+                        else (textures.PAVEMENT if paved else textures.ROAD),
                         cover="road",
-                        wall_tex=textures.KERB,
+                        # A bridge's sides are not kerbs, they are the face of
+                        # a deck — and where one cuts a road off, that face is
+                        # what the road now ends at. Dark, so it reads as the
+                        # mouth of an underpass rather than as a wall someone
+                        # left across the carriageway.
+                        wall_tex=textures.BRIDGE_FACE if spanning else textures.KERB,
                         light=ROAD_LIGHT,
                         sloped=with_slopes,
                         height_at=surface,

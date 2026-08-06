@@ -27,7 +27,7 @@ import pytest
 from postcode2wad import geometry as geometry_module
 from postcode2wad.build import build_tile
 from postcode2wad.sources import postcodes
-from postcode2wad.textures import BARRIER_TOPS
+from postcode2wad.textures import STANDS_PROUD
 
 CACHE = Path("cache")
 POSTCODE = "CT1 2EH"
@@ -151,8 +151,8 @@ def test_no_spires_between_ground_sectors(tile):
         # this docstring says was fixed once already. Excluded by name now,
         # which is what the intent always was.
         if (
-            sa.get("texturefloor") in BARRIER_TOPS
-            or sb.get("texturefloor") in BARRIER_TOPS
+            sa.get("texturefloor") in STANDS_PROUD
+            or sb.get("texturefloor") in STANDS_PROUD
         ):
             continue
         v1, v2 = tile.vertices[line["v1"]], tile.vertices[line["v2"]]
