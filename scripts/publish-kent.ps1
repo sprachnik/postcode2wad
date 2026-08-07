@@ -70,12 +70,26 @@ Write-Host "all $($have.Count) districts present at $(Get-Date -Format 'HH:mm:ss
 # part of its run. Bumping afterwards would ship the old constant.
 $play = 'scripts/webdemo/play.html'
 $stamp = Get-Date -Format 'yyyyMMdd'
-$text = Get-Content $play -Raw
+
+# Read and write through .NET with an explicit no-BOM UTF-8, NOT Get-Content /
+# Set-Content. Windows PowerShell 5.1's `Get-Content -Raw` decodes a BOM-less
+# file as the ANSI codepage, so every UTF-8 em-dash arrives as two Latin-1
+# characters; `Set-Content -Encoding UTF8` then re-encodes those as UTF-8 and
+# adds a BOM. The round trip is lossy in both directions at once.
+#
+# This shipped. The 7 Aug Kent publish rewrote play.html this way and put
+# "no tile selected â€” go back to the map" and "bootingâ€¦" live, plus a BOM
+# ahead of the doctype. Nothing failed and nothing was logged: the regex
+# matched, the bump was correct, the deploy reported success, and the damage
+# was to every non-ASCII character in the file *except* the one being edited.
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+$full = (Resolve-Path $play).Path
+$text = [System.IO.File]::ReadAllText($full, $utf8)
 if ($text -match "const PK3_V = '([^']+)'") {
     $old = $Matches[1]
     $new = $stamp + 'k'   # k for Kent; any change is enough, this is just legible
     $text = $text -replace "const PK3_V = '[^']+'", "const PK3_V = '$new'"
-    Set-Content $play -Value $text -NoNewline -Encoding UTF8
+    [System.IO.File]::WriteAllText($full, $text, $utf8)
     Write-Host "PK3_V $old -> $new"
 } else {
     Write-Host "NOT PUBLISHING - could not find PK3_V in $play"
