@@ -46,7 +46,7 @@ hide there.
 Run these before claiming anything works:
 
 ```
-.venv/Scripts/python.exe -m pytest -q                          # 69 tests
+.venv/Scripts/python.exe -m pytest -q                          # 89 tests
 .venv/Scripts/python.exe -m ruff check .
 .venv/Scripts/python.exe scripts/onesided.py out/REGION.pk3    # must be 0
 .venv/Scripts/python.exe scripts/reachability.py "CT1 2EH"
@@ -113,49 +113,41 @@ making the number better.
   worse, say so and revert it. Never state a figure you have not just measured,
   and label extrapolations as extrapolations.
 
-## Where to pick up (as of 3 Aug 2026)
+## Where to pick up (as of 7 Aug 2026)
 
 Fuller list in [`TODO.md`](TODO.md); this is the ordering and the reasoning.
 
-**1. Mirror the 1m DSM for the TR square — this is what actually blocks
-eastern Kent, and it is not the harness.**
+**Kent is done and deployed.** All 13 districts, built 6–7 Aug in 16h58m:
+6,888 tiles generated, **6,195 unique** (districts share border squares),
+3,964.80 km², 54.0M sectors, 399k buildings, 4.77M trees, 8.9s per tile. Live
+at doomearth.clawhangout.com — 13,817 objects, 4.63 GB in R2. The 13 district
+PK3s are 4.48 GB for native GZDoom.
 
-`scripts/build-district.py` exists and works: Thanet, 200 tiles at 800m, 28.5
-minutes, 0 failures, 111 MB, `M0001`..`M0200`, 0 one-sided lines across all 200
-maps. Subprocess per tile, resumable from artifacts on disk, progress and
-failure logs.
-
-But **the Thanet run was network-bound, not CPU-bound**, and the "~70s of
-geometry per tile" figure this file used to carry was wrong. Measured by
-building the same 16 tiles twice — density-spread from 37 to 32,290 sectors,
-same 8 workers, once cold and once with the LIDAR cache warm:
-
-| | cold | warm |
-| --- | --- | --- |
-| median tile | ~66s | ~5s |
-| mean | 71s | 11.4s |
-| densest (32,290 sectors) | 139s | 75.5s |
-
-So ~55s of every 66s tile was the WCS DSM fetch. One serial WCS request is
-2-3s, but eight concurrent ones queue to ~8s each, which is why 200 tiles took
-28.5 minutes (200 x 8s ≈ 27) while the geometry in them was about 5. **Adding
-cores will not speed up TR.** The EA's bulk DSM is a metadata-only zip for
-every TR tile — Thanet, Canterbury, Dover — so those three districts fetch DSM
-over the network one round trip per tile. `docs/lidar-bulk.md` §5 has the three
-ways out; mirroring the DSM from the WCS in 5km blocks preserves output
-exactly.
+That closes the two items this section used to lead with, and the reasoning is
+worth keeping because it is what made a county practical. The Thanet run was
+**network-bound, not CPU-bound**: measured by building the same 16 tiles twice,
+cold and with the LIDAR cache warm, the median tile went ~66s → ~5s, so ~55s of
+every tile was the WCS DSM fetch. The EA's *bulk* 1m last-return DSM is a
+metadata-only zip for every TR square, so eastern Kent was mirrored from the
+OGC WCS in 5km blocks instead (bit-identical output — `docs/lidar-bulk.md`).
+With the mirror in place the whole county ran off disk and 8.9s/tile is
+geometry.
 
 Geometry *is* superlinear in sector count (37 sectors → 1.4s, 32,290 → 75.5s),
 so dense town tiles are genuinely CPU-heavy. It is the median tile that is not.
 
-TQ has a working bulk DSM, so western Kent should be CPU-bound and much
-faster — but that is an inference from the packaging defect's extent, not a
-measurement. Measure a TQ district before sizing Kent.
+**Two measurement traps this run set, both now fixed — expect more of the same
+shape.** Districts *share* their border squares, so summing per-district areas
+double-counted 670 of them and overstated Kent by 444 km² (11%); the page's own
+fallback had the same bug independently. And `build-webdemo.py` regenerates the
+full 1.16 MB art set **per tile** (1.55s each) which `split_common` then
+factors straight back out — ~3 hours of the run was generating byte-identical
+art 6,888 times, single-threaded on 16 cores. An `lru_cache` on
+`art.pk3_assets` should take site assembly from ~3h to minutes; not done,
+because it was spotted mid-run and is not worth hot-swapping into a live job.
+**Do this before the next county**, and diff a district byte-for-byte after.
 
-**2. Download the rest of Kent's LIDAR** (~10 GB; only Thanet's 12 squares and
-2 TQ squares are mirrored). Left as a human decision deliberately.
-
-**3. The beach is the choppiest surface on the map and nothing has touched it.**
+**1. The beach is the choppiest surface on the map and nothing has touched it.**
 Confirmed at district scale, so it is not a Birchington artefact: across all 200
 Thanet tiles DMSAND is p50 4.6°, p95 29.1°, p99 55.9° on 21,758 joins — the
 worst p50 *and* p95 of any surface. (Birchington alone read p50 6.9, p95 31.8.)
@@ -169,7 +161,7 @@ region before. Note every material has a max above 75° — a thin district-wide
 tail of degenerate joins, consistent with the known sliver defect. It is a
 tail, not a median; do not chase it with a rule that moves the median.
 
-**4. Multiplayer** is untested and needs no code — see
+**2. Multiplayer** is untested and needs no code — see
 [`docs/multiplayer-test.md`](docs/multiplayer-test.md), half an hour. The real
 risk is desync, not load: netplay is deterministic lockstep and sloped floor
 planes are the only floating-point geometry emitted, so `--no-slopes` is the
@@ -180,8 +172,9 @@ design drags everyone along with whoever reaches a tile edge first.
 MAP03 with a 9.9m step; one pavement junction stepping 28.8 units, past the
 climb limit, and pre-existing; no automatic regression test for road flatness;
 multipolygon relations dropped by both OSM readers (deliberate, so the two
-agree); `covers()` uses the extract's header bbox not Geofabrik's `.poly`, so a
-tile at the county edge generates empty rather than falling back.
+agree). `covers()` reading the header bbox rather than Geofabrik's `.poly` is
+fixed — a border tile went 2/22/4 features to 7/40/7, matching Overpass
+exactly, with an interior control tile byte-identical.
 
 ## Environment
 

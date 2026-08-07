@@ -22,8 +22,8 @@ to geometry, not the geocoder.
 The build needs a 1m LIDAR digital surface model for the ground you ask for. Where that
 has been mirrored locally, a tile builds in seconds; where it has not, it is fetched
 over the network a tile at a time, and where the Environment Agency has no survey at
-all, it cannot be built. **Thanet's 200 tiles are built and browsable**; the rest of Kent
-and beyond is a matter of downloading more LIDAR, not of new code.
+all, it cannot be built. **The whole of Kent — all 13 districts, 6,195 squares — is
+built and browsable**; beyond it is a matter of downloading more LIDAR, not of new code.
 
 ## Status
 
@@ -79,17 +79,25 @@ tile is a resumable artifact on disk, so a run measured in hours cannot lose eve
 to a single bad tile. Packs of more than 99 maps are named `M0001`.. rather than
 `MAP01`, which lifts the ceiling to 9,999.
 
-Two areas get quoted about a district and they are not the same number, so this file
-says which it means. **128 km² is the generated map** — 200 tiles of 0.64 km² — and it
-is the size of the playable world. Thanet as a place is **103 km²**; the tiles are the
-grid squares intersecting its ONS polygon, so they overhang its edges. The running
-total across every built district is computed by `build-webdemo.py`, printed at the end
-of every build, and carried in `districts.json` for the site to display — never typed
-into a document, where it would start drifting from what shipped.
+All 13 Kent districts have been built the same way: **6,195 squares, 3,965 km² of
+generated map, 54.0M sectors, 399k buildings and 4.77M trees**, in 17 hours on one
+machine at 8.9s per tile. The 13 district PK3s are 4.48 GB for native GZDoom; the
+browser site is 4.63 GB of per-tile PK3s.
+
+Two areas get quoted and they are not the same number, so this file says which it means.
+**3,965 km² is the generated map** — 6,195 squares of 0.64 km² — and it is the size of
+the playable world. Kent as a place is about **3,740 km²**; the tiles are the grid
+squares intersecting each ONS polygon, so they overhang the county's edges and its
+coast. A third number is easy to get wrong and was: districts *share* their border
+squares, so summing per-district areas counts 670 of them twice and overstates the
+total by 444 km². The published figure counts each square once. It is computed by
+`build-webdemo.py`, printed at the end of every build, and carried in `districts.json`
+for the site to display — never typed into a document, where it would start drifting
+from what shipped.
 
 **And all of it is playable in a browser: [doomearth.clawhangout.com](https://doomearth.clawhangout.com).**
-Type a postcode to land on the square that covers it, or pick any of Thanet's 200 tiles
-off a minimap grid; choose a performance mode, spawn on
+Type a postcode to land on the square that covers it, or pick any of Kent's 6,195 squares
+off a pan-and-zoom national grid; choose a performance mode, spawn on
 it, and walk to a tile edge to cross into the neighbour — the launcher reads the HUD's
 telemetry off the engine's console stream, loads the next tile when you push into the
 boundary, and hands your position across so you come out on the same street rather than
@@ -106,10 +114,13 @@ A postcode outside the built tiles is told so plainly — it names the district 
 more regions are coming — rather than failing, because most of the country is not built
 yet and that is the honest state of the project rather than a bug.
 
-Still to come: more districts, street-name signs, and a bulk DSM mirror for eastern
-Kent — the district run above is network-bound, not CPU-bound, because the Environment
-Agency's bulk 1m DSM is missing for the whole TR grid square (see
-[`docs/lidar-bulk.md`](docs/lidar-bulk.md)).
+Kent's LIDAR is mirrored locally, which is what made a county practical: the Environment
+Agency's *bulk* 1m last-return DSM is a metadata-only zip for the whole TR grid square,
+so eastern Kent was mirrored from the OGC WCS instead, one 5km square at a time (see
+[`docs/lidar-bulk.md`](docs/lidar-bulk.md)). With that done the run is CPU-bound rather
+than network-bound, and 8.9s per tile is geometry.
+
+Still to come: more counties, and street-name signs.
 
 See [`TODO.md`](TODO.md) for the working list — including the known rough edges —
 [`CLAUDE.md`](CLAUDE.md) for how to work on it without repeating old mistakes, and
