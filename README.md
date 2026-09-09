@@ -9,8 +9,8 @@ land cover, and the output is a PK3 that loads in stock GZDoom.
 > not a finished product and the rough edges are documented rather than hidden.
 
 ```
-postcode2wad "CT1 2EH" --size 400 --out birchington.pk3
-gzdoom -iwad freedoom2.wad -file birchington.pk3 +map MAP01
+postcode2wad "CT1 2EH" --size 400 --out canterbury.pk3
+gzdoom -iwad freedoom2.wad -file canterbury.pk3 +map MAP01
 ```
 
 A postcode is the usual way in, because it is the handle most people have for a place —
@@ -42,10 +42,10 @@ billboards, and building facades with sash windows, sills, doors and eaves at re
 storey heights.
 
 ```
-postcode2wad "CT1 2EH" --size 400 --out birchington.pk3 --preview plan.png
+postcode2wad "CT1 2EH" --size 400 --out canterbury.pk3 --preview plan.png
 ```
 ```
-CT1 2EH — Birchington, Thanet  (51.36099, 1.26650)  OSGB 627500E 167500N
+CT1 2EH — Westgate, Canterbury  (51.27881, 1.08349)  OSGB 615146E 157812N
 tile bng400-1574-423  (400m square)
 74 buildings, 90 road pieces, 0 water, 0 sea, 0 beach, 41 land parcels, 33 barriers,
 574 trees, 12 terrain bands, terrain 12.0-20.0m
@@ -62,7 +62,7 @@ A region pack builds a block of neighbouring tiles into one PK3 with a level cha
 each tile edge, and a ZScript HUD carries a minimap, compass and live lat/lng:
 
 ```
-postcode2wad "CT1 2EH" --size 800 --region 1 --out out/birchington-area.pk3
+postcode2wad "CT1 2EH" --size 800 --region 1 --out out/canterbury-area.pk3
 ```
 
 A whole local authority district goes in one PK3, built in parallel:
@@ -122,9 +122,9 @@ than network-bound, and 8.9s per tile is geometry.
 
 Still to come: more counties, and street-name signs.
 
-See [`TODO.md`](TODO.md) for the working list — including the known rough edges —
-[`CLAUDE.md`](CLAUDE.md) for how to work on it without repeating old mistakes, and
-[`docs/brief.md`](docs/brief.md) for the full brief and milestones.
+See [`CLAUDE.md`](CLAUDE.md) for how to work on it without repeating old
+mistakes — including the known rough edges — and [`docs/brief.md`](docs/brief.md)
+for the full brief and milestones.
 
 ## How it works
 

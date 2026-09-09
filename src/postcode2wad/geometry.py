@@ -539,7 +539,7 @@ def _floor_plane(face: Polygon, height_at) -> tuple[float, float, float, float] 
     # contagious: the face takes a neighbour's plane, which then misses its own
     # other corners, and those joins step in turn. Across the nine tiles the
     # worst ground step went from 9.9m on one 10cm edge to 19.8m on ordinary
-    # ones. One blade is the better state, and it is logged in TODO.md.
+    # ones. One blade is the better state.
     return (a, b, c, d)
 
 

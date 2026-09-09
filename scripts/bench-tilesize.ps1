@@ -15,10 +15,10 @@
     baseline to subtract.
 
 .EXAMPLE
-    .\scripts\bench-tilesize.ps1 -Postcode "CT1 2EH" -Sizes 400,600,800,1000
+    .\scripts\bench-tilesize.ps1 -Postcode "CT7 0EP" -Sizes 400,600,800,1000
 #>
 param(
-    [string]$Postcode = "CT1 2EH",
+    [string]$Postcode = "CT7 0EP",
     [int[]]$Sizes = @(400, 600, 800, 1000, 1200),
     [string]$OutDir = "out/bench",
     [int]$LoadTimeout = 180

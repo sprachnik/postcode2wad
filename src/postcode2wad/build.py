@@ -631,7 +631,7 @@ def build_tile(
         # motorway sagging into a cutting reads as broken.
         #
         # This does not make the lower road passable. Nothing here can — that
-        # needs GZDoom 3D floors, see TODO.md. It makes the geometry honest
+        # needs GZDoom 3D floors. It makes the geometry honest
         # about which way is on top.
         road_shapes = sorted(
             roads_to_shapes(features.roads, tile),

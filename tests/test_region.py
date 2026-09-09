@@ -167,13 +167,13 @@ def test_radius_beyond_the_naming_ceiling_is_refused():
     assert (radius * 2 + 1) ** 2 > MAX_MAPS, "radius must exceed the ceiling to test it"
 
     place = Place(
-        postcode="CT1 2EH",
-        easting=627500,
-        northing=167500,
-        lat=51.36099,
-        lon=1.26650,
-        name="Birchington",
-        query="CT1 2EH",
+        postcode="CT7 0EP",
+        easting=632892,
+        northing=168095,
+        lat=51.364149,
+        lon=1.344199,
+        name="Manston",
+        query="CT7 0EP",
     )
     with pytest.raises(ValueError, match=str(MAX_MAPS)):
         build_region(place, radius=radius)

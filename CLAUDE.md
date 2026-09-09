@@ -1,8 +1,7 @@
 # Working on postcode2wad
 
-Read [`README.md`](README.md) for what this is and [`TODO.md`](TODO.md) for the
-working list. This file is about *how to work on it safely*, and every line of
-it was paid for.
+Read [`README.md`](README.md) for what this is. This file is about *how to work
+on it safely*, and every line of it was paid for.
 
 ## The one thing to internalise
 
@@ -49,7 +48,7 @@ Run these before claiming anything works:
 .venv/Scripts/python.exe -m pytest -q                          # 89 tests
 .venv/Scripts/python.exe -m ruff check .
 .venv/Scripts/python.exe scripts/onesided.py out/REGION.pk3    # must be 0
-.venv/Scripts/python.exe scripts/reachability.py "CT1 2EH"
+.venv/Scripts/python.exe scripts/reachability.py "CT7 0EP"
 .venv/Scripts/python.exe scripts/flatness.py out/REGION.pk3
 .venv/Scripts/python.exe scripts/whystuck.py out/R.pk3 MAP06 12405 6941
 ```
@@ -115,7 +114,7 @@ making the number better.
 
 ## Where to pick up (as of 7 Aug 2026)
 
-Fuller list in [`TODO.md`](TODO.md); this is the ordering and the reasoning.
+This is the ordering and the reasoning.
 
 **Kent is done and deployed.** All 13 districts, built 6–7 Aug in 16h58m:
 6,888 tiles generated, **6,195 unique** (districts share border squares),

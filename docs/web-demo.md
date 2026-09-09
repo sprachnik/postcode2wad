@@ -183,7 +183,7 @@ defeats Doom's wall-based BSP occlusion. Consequences:
 - **The web demo ships single tiles** (~8k median sectors — "not amazing but
   not terrible" on the same machine), not region packs. Regions stay as
   downloads for native play.
-- **Sector decimation (TODO #6) is promoted** from polish to the path to
+- **Sector decimation is promoted** from polish to the path to
   browser-playable regions. Fewer sectors also helps native FPS, build time
   and file size.
 - The performance modes (Quality/Balanced/Performance = render scale) exist

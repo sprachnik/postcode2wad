@@ -30,7 +30,7 @@ from postcode2wad.sources import postcodes
 from postcode2wad.textures import STANDS_PROUD
 
 CACHE = Path("cache")
-POSTCODE = "CT1 2EH"
+POSTCODE = "CT7 0EP"
 
 #: The roof flat, so a building face is recognisable in the emitted map.
 ROOF_FLAT = "CEIL5_2"

@@ -1,7 +1,7 @@
 # Prior art
 
 **Re-verified 4 August 2026.** This supersedes the prior-art paragraph in commit
-`3acc8fc` and the entry that stood in [`TODO.md`](../TODO.md), both of which were
+`3acc8fc` and the entry that stood in the old working list, both of which were
 wrong in a way that mattered: they cleared the project to make claims it cannot make.
 
 Three independent adversarial sweeps, each instructed to *refute* novelty rather than

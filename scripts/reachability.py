@@ -1,6 +1,6 @@
 """How much of a tile can the player actually walk to?
 
-    python scripts/reachability.py "CT1 2EH"
+    python scripts/reachability.py "CT7 0EP"
 
 Flood-fills the sector graph from the player start, crossing a two-sided edge
 only when the step at its midpoint is within Doom's 24-unit climb limit and the
@@ -63,7 +63,7 @@ def floor_z(sector: dict, x: float, y: float) -> float:
 
 
 def main() -> int:
-    query = sys.argv[1] if len(sys.argv) > 1 else "CT1 2EH"
+    query = sys.argv[1] if len(sys.argv) > 1 else "CT7 0EP"
 
     captured = {}
     original = geometry_module.build_geometry
